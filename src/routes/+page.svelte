@@ -1,12 +1,32 @@
 <script lang="ts">
+	import {
+		EventStore,
+		todoCreatedEvent,
+		todoToggledEvent,
+		rebuildTodosFromEvents
+	} from '$lib/event-store.js';
+
 	type Todo = { id: string; title: string; done: boolean };
 	let todos = $state<Todo[]>([]);
 	let newTitle = $state('');
+	const eventStore = new EventStore();
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
-		const formData = new FormData(e.target);
-		todos.push({ id: crypto.randomUUID(), title: formData.get('title'), done: false });
+		const formData = new FormData(e.target as HTMLFormElement);
+		const title = formData.get('title');
+
+		if (
+			(title && typeof title === 'string' && title.length === 0) ||
+			!title ||
+			typeof title !== 'string'
+		) {
+			throw Error('No title');
+		}
+
+		eventStore.append(todoCreatedEvent({ title }));
+		todos = rebuildTodosFromEvents(eventStore.events);
+
 		newTitle = '';
 	}
 </script>
@@ -27,8 +47,9 @@
 						type="checkbox"
 						id={todo.id}
 						checked={todo.done}
-						oninput={(e: Event) => {
-							todo.done = e.target.checked;
+						oninput={() => {
+							eventStore.append(todoToggledEvent({ id: todo.id }));
+							todos = rebuildTodosFromEvents(eventStore.events);
 						}}
 					/>
 					{todo.title}</label
