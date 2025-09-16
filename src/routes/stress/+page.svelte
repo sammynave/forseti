@@ -5,7 +5,7 @@
 		todoCreatedEvent,
 		todoToggledEvent
 	} from '$lib/event-store.js';
-	import { ZSet } from '$lib/stream.js';
+	import { ZSet } from '$lib/z-set.js';
 	import { onMount } from 'svelte';
 
 	type Todo = { id: string; title: string; done: boolean };

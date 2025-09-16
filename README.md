@@ -1,3 +1,55 @@
+### __Missing Critical DBSP Components:__
+
+1. __Differentiation Operator (Definition 2.15)__ - __MISSING__
+
+   - Should compute: `D(s)[t] = s[t] - s[t-1]`
+   - This is fundamental for incremental computation
+
+2. __Delay Operator (Definition 2.5)__ - __MISSING__
+
+   - Should implement: `z⁻¹(s)[t] = {0 if t=0, s[t-1] if t≥1}`
+   - Essential for feedback loops and recursion
+
+3. __Incremental Transformation (Definition 3.1)__ - __MISSING__
+
+   - The core `Q^Δ = D ∘ Q ∘ I` transformation
+   - This is the heart of DBSP's incremental view maintenance
+
+4. __Stream Operators Properties__ - __PARTIALLY MISSING__
+
+   - Time-invariance (Definition 2.6)
+   - Causality (Definition 2.7)
+   - Strictness (Definition 2.8)
+   - Linear/Bilinear operators (Definitions 2.12, 2.13)
+
+5. __Recursive Query Support (Section 5)__ - __MISSING__
+
+   - `δ₀` (stream introduction) and `∫` (stream elimination) operators
+   - Nested time domains for recursive computations
+   - Fixed-point computation circuits
+
+### 🔧 __Implementation Issues Found:__
+
+1. __Stream Type Inconsistency__:
+
+   - Tests show `Stream<Event>` but implementation uses `Stream` with Z-sets
+   - Should be consistent with DBSP's typed streams
+
+2. __Missing Operator Composition__:
+
+   - No circuit-building infrastructure
+   - No operator chaining as shown in DBSP diagrams
+
+3. __Limited Relational Algebra Support__:
+
+   - No implementation of Table 1 operators (σ, π, ⊲⊳, ×, etc.)
+   - No `distinct` operator implementation
+
+##
+
+
+
+
 # Svelte library
 
 Everything you need to build a Svelte library, powered by [`sv`](https://npmjs.com/package/sv).

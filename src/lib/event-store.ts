@@ -1,4 +1,4 @@
-import { Stream, integrate, ZSet } from './stream.js';
+import { ZSet } from './z-set.js';
 
 type TodoCreatedEvent = {
 	type: 'TodoCreated';
@@ -94,14 +94,14 @@ export class EventStore {
 
 		this.notify();
 
-		if (window.debug) {
-			console.log(
-				`⚡ Event ${this.eventCount} processed in ${(performance.now() - startTime).toFixed(2)}ms`
-			);
-			console.log(
-				`📊 Current: ${this.currentSnapshot.materialize.length} todos, History: ${this.recentSnapshots.length} snapshots`
-			);
-		}
+		// if (window && window?.debug) {
+		// 	console.log(
+		// 		`⚡ Event ${this.eventCount} processed in ${(performance.now() - startTime).toFixed(2)}ms`
+		// 	);
+		// 	console.log(
+		// 		`📊 Current: ${this.currentSnapshot.materialize.length} todos, History: ${this.recentSnapshots.length} snapshots`
+		// 	);
+		// }
 	}
 
 	getCurrentSnapshot(): ZSet {
@@ -129,11 +129,11 @@ export class EventStore {
 
 // New function in event-store.ts
 export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
-	if (window.debug) {
-		console.log(
-			`🔄 Processing event: ${event.type}, snapshot size: ${currentSnapshot?.materialize.length || 0}`
-		);
-	}
+	// if (window && window?.debug) {
+	// 	console.log(
+	// 		`🔄 Processing event: ${event.type}, snapshot size: ${currentSnapshot?.materialize.length || 0}`
+	// 	);
+	// }
 	const change = new ZSet();
 
 	if (event.type === 'TodoCreated') {
@@ -158,9 +158,9 @@ export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
 		}
 	}
 
-	if (window.debug) {
-		console.log(`✅ Generated change with ${change.materialize.length} items`);
-	}
+	// if (window && window?.debug) {
+	// 	console.log(`✅ Generated change with ${change.materialize.length} items`);
+	// }
 	return change;
 }
 

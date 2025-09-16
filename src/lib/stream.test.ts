@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { todoCreatedEvent, todoDeletedEvent, todoToggledEvent, type Event } from './event-store.js';
-import { integrate, Stream, ZSet } from './stream.js';
+import { Stream } from './stream.js';
+import { integrate } from './stream/utils.js';
+import { ZSet } from './z-set.js';
 
 describe('Stream', () => {
 	it('can set and get', () => {
-		const eventStream = new Stream<Event>();
+		const eventStream = new Stream();
 
 		const firstEvent = todoCreatedEvent({ title: 'test' });
 		const secondEvent = todoToggledEvent({ id: '123' });
@@ -25,7 +27,7 @@ describe('Stream', () => {
 
 	it('integrate() accumulates Z-set changes into snapshots', () => {
 		// Create stream of Z-set changes
-		const changes = new Stream<ZSet>();
+		const changes = new Stream();
 
 		const todo1 = { id: 'todo1', title: 'Test', done: false };
 		const todo2 = { id: 'todo2', title: 'Test2', done: false };
@@ -55,111 +57,145 @@ describe('Stream', () => {
 	});
 });
 
-describe('ZSet', () => {
-	it('can combined two ZSets', () => {
+describe('Stream Operators - DBSP Compliance', () => {
+	it('differentiate computes stream differences', () => {
+		const stream = new Stream();
+
+		// t=0: Add item
+		const zset0 = new ZSet();
+		zset0.add('item1', 1);
+		stream.append(zset0);
+
+		// t=1: Add another item
 		const zset1 = new ZSet();
-		zset1.add('todo1', 1);
-		zset1.add('todo2', 2);
+		zset1.add('item1', 1);
+		zset1.add('item2', 1);
+		stream.append(zset1);
+
+		const diff = stream.differentiate();
+
+		// D[0] = s[0]
+		expect(diff.get(0).materialize).toEqual(['item1']);
+		// D[1] = s[1] - s[0] = just item2
+		// since item1 already existed, it doesn't matter that we add it again
+		expect(diff.get(1).materialize).toEqual(['item2']);
+	});
+
+	it('delay shifts stream by one time unit', () => {
+		const stream = new Stream();
+		const zset = new ZSet();
+		zset.add('item', 1);
+		stream.append(zset);
+
+		const delayed = stream.delay();
+
+		expect(stream.get(0).materialize).toEqual(['item']);
+		// First element should be empty
+		expect(delayed.get(0).materialize).toEqual([]);
+		// Second element should be original first
+		expect(delayed.get(1).materialize).toEqual(['item']);
+	});
+
+	it('applyIncremental applies incremental query', () => {
+		const changes = new Stream();
+		const change = new ZSet();
+		change.add({ name: 'test' }, 1);
+		changes.append(change);
+
+		const result = changes.applyIncremental((stream) =>
+			stream.liftFilter((item) => item.name === 'test')
+		);
+
+		expect(result.get(0).materialize).toEqual([{ name: 'test' }]);
+	});
+});
+
+describe('Stream Lifted Operators', () => {
+	it('liftFilter filters items in stream', () => {
+		const stream = new Stream();
+		const zset = new ZSet();
+		zset.add({ type: 'keep' }, 1);
+		zset.add({ type: 'remove' }, 1);
+		stream.append(zset);
+
+		const filtered = stream.liftFilter((item) => item.type === 'keep');
+
+		expect(filtered.get(0).materialize).toEqual([{ type: 'keep' }]);
+	});
+
+	it('liftProject transforms items in stream', () => {
+		const stream = new Stream();
+		const zset = new ZSet();
+		zset.add({ name: 'test', value: 42 }, 1);
+		stream.append(zset);
+
+		const projected = stream.liftProject((item) => ({ name: item.name }));
+
+		expect(projected.get(0).materialize).toEqual([{ name: 'test' }]);
+	});
+
+	it('liftJoin joins two streams', () => {
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		const zset1 = new ZSet();
+		zset1.add({ id: 1, name: 'A' }, 1);
+		stream1.append(zset1);
 
 		const zset2 = new ZSet();
-		zset2.add('todo2', -1); // Reduces weight
-		zset2.add('todo3', 1); // New item
+		zset2.add({ id: 1, value: 100 }, 1);
+		stream2.append(zset2);
 
-		const result = zset1.plus(zset2);
-		expect(Array.from(result.data.entries())).toStrictEqual([
-			['"todo1"', 1],
-			['"todo2"', 1],
-			['"todo3"', 1]
+		const joined = stream1.liftJoin(
+			stream2,
+			(item) => item.id,
+			(item) => item.id
+		);
+
+		expect(joined.get(0).materialize).toEqual([
+			[
+				{ id: 1, name: 'A' },
+				{ id: 1, value: 100 }
+			]
 		]);
 	});
 
-	it('is commutative', () => {
+	it('liftDistinct removes duplicates in stream', () => {
+		const stream = new Stream();
+		const zset = new ZSet();
+		zset.add('item', 3); // weight > 1
+		stream.append(zset);
+
+		const distinct = stream.liftDistinct();
+
+		// Should have weight 1 now
+		expect(distinct.get(0).materialize).toEqual(['item']);
+	});
+});
+
+describe('Lifting Operator (↑f)', () => {
+	it('handles gaps with empty ZSets', () => {
+		const stream = new Stream();
+
 		const zset1 = new ZSet();
-		zset1.add('todo1', 1);
-		zset1.add('todo2', 2);
+		zset1.add('item1', 1);
 
-		const zset2 = new ZSet();
-		zset2.add('todo2', -1); // Reduces weight
-		zset2.add('todo3', 1); // New item
+		stream.set(0, zset1);
+		stream.set(2, zset1); // Gap at t=1
 
-		const result = zset1.plus(zset2);
-		const result2 = zset2.plus(zset1);
-		expect(result).toStrictEqual(result2);
+		// Gap filled with empty ZSet
+		expect(stream.get(1).materialize.length).toBe(0);
+		expect(stream.length).toBe(3);
 	});
 
-	it('handles zero weights correctly', () => {
-		const zset1 = new ZSet();
-		zset1.add('item', 5);
+	it('lift works correctly', () => {
+		const stream = new Stream();
 
-		const zset2 = new ZSet();
-		zset2.add('item', -5);
-
-		const result = zset1.plus(zset2);
-		expect(result.data.get('"item"')).toBe(0); // Should be 0, not undefined
-	});
-
-	it('zero() returns empty Z-set', () => {
 		const zset = new ZSet();
-		const zero = zset.zero();
+		zset.add('item', 1);
+		stream.append(zset);
 
-		expect(zero.data.size).toBe(0);
-		expect(Array.from(zero.data.entries())).toStrictEqual([]);
-	});
-
-	it('zero() is additive identity (a + 0 = a)', () => {
-		const zset = new ZSet();
-		zset.add('todo1', 5);
-		zset.add('todo2', -2);
-
-		const result = zset.plus(zset.zero());
-
-		expect(Array.from(result.data.entries())).toStrictEqual([
-			['"todo1"', 5],
-			['"todo2"', -2]
-		]);
-	});
-
-	it('negate() flips all weights', () => {
-		const zset = new ZSet();
-		zset.add('todo1', 3);
-		zset.add('todo2', -1);
-		zset.add('todo3', 0);
-
-		const negated = zset.negate();
-
-		expect(Array.from(negated.data.entries())).toStrictEqual([
-			['"todo1"', -3],
-			['"todo2"', 1],
-			['"todo3"', -0]
-		]);
-		expect(-0 === 0).toBe(true);
-	});
-
-	it('a + (-a) = zero (additive inverse property)', () => {
-		const zset = new ZSet();
-		zset.add('todo1', 5);
-		zset.add('todo2', -2);
-
-		const result = zset.plus(zset.negate());
-
-		// Should be all zeros (empty when materialized)
-		expect(Array.from(result.data.entries())).toStrictEqual([
-			['"todo1"', 0],
-			['"todo2"', 0]
-		]);
-		expect(result.materialize).toStrictEqual([]);
-	});
-
-	it('double negation: -(-a) = a', () => {
-		const zset = new ZSet();
-		zset.add('todo1', 3);
-		zset.add('todo2', -1);
-
-		const doubleNegated = zset.negate().negate();
-
-		expect(Array.from(doubleNegated.data.entries())).toStrictEqual([
-			['"todo1"', 3],
-			['"todo2"', -1]
-		]);
+		const negated = stream.lift((z) => z.negate());
+		expect(negated.get(0).debug().get('"item"')).toBe(-1);
 	});
 });
