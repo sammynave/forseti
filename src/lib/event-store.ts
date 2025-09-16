@@ -1,4 +1,4 @@
-import { ZSet } from './stream.js';
+import { Stream, integrate, ZSet } from './stream.js';
 
 type TodoCreatedEvent = {
 	type: 'TodoCreated';
@@ -39,49 +39,40 @@ export function todoDeletedEvent({ id }: { id: string }): TodoDeletedEvent {
 
 export class EventStore {
 	events: Event[] = [];
-	private todos = new ZSet();
+	private eventsStream = new Stream<Event>();
+	private changesStream = new Stream<ZSet>();
+	private snapshotsStream = new Stream<ZSet>();
 
 	append(event: Event) {
 		this.events.push(event);
-		this.applyEventToZSet(event);
-	}
+		const t = this.eventsStream.append(event);
 
-	private applyEventToZSet(event: TodoCreatedEvent | TodoToggledEvent | TodoDeletedEvent) {
-		if (event.type === 'TodoCreated') {
-			this.insert({ id: event.id, title: event.title, done: false }, 'todos');
-		} else if (event.type === 'TodoToggled') {
-			// Find the current todo and toggle it
-			const currentTodos = this.todos.materialize;
-			const todo = currentTodos.find((t) => t.id === event.id);
-			if (todo) {
-				this.delete(todo, 'todos'); // Remove old version (weight -1)
-				this.insert({ ...todo, done: !todo.done }, 'todos'); // Add new version (weight +1)
-			}
-		} else if (event.type === 'TodoDeleted') {
-			const currentTodos = this.todos.materialize;
-			const todo = currentTodos.find((t) => t.id === event.id);
-			if (todo) {
-				this.delete(todo, 'todos');
-			}
-		}
-	}
+		// Get previous snapshot (O(1))
+		const currentSnapshot = t > 0 ? this.snapshotsStream.get(t - 1) : new ZSet();
 
-	/* STAART Maybe these should move */
-	// Convenience methods for common operations
-	insert(item: unknown, into: 'todos') {
-		this[into].add(item, 1);
-	}
+		// Convert event to change (O(1))
+		const change = eventToZSetChange(event, currentSnapshot);
+		this.changesStream.set(t, change);
 
-	delete(item: unknown, into: 'todos') {
-		this[into].add(item, -1);
+		// ✅ EFFICIENT: Incremental update (O(|change|))
+		const newSnapshot = currentSnapshot.plus(change);
+		this.snapshotsStream.set(t, newSnapshot);
 	}
 
 	getTodos(): Todo[] {
-		return this.todos.materialize;
+		const latestTime = this.snapshotsStream.length - 1;
+		if (latestTime >= 0) {
+			return this.snapshotsStream.get(latestTime).materialize;
+		}
+		return [];
 	}
 
 	getZSetDebug(): Map<string, number> {
-		return this.todos.debug();
+		const latestTime = this.snapshotsStream.length - 1;
+		if (latestTime >= 0) {
+			return this.snapshotsStream.get(latestTime).debug();
+		}
+		return new Map();
 	}
 }
 
@@ -103,7 +94,13 @@ export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
 			}
 		}
 	} else if (event.type === 'TodoDeleted') {
-		// Similar logic for delete
+		if (currentSnapshot) {
+			const currentTodos = currentSnapshot.materialize;
+			const todo = currentTodos.find((t: Todo) => t.id === event.id);
+			if (todo) {
+				change.add(todo, -1); // Remove the todo
+			}
+		}
 	}
 
 	return change;
