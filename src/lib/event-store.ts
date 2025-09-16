@@ -38,10 +38,23 @@ export function todoDeletedEvent({ id }: { id: string }): TodoDeletedEvent {
 }
 
 export class EventStore {
-	events: Event[] = [];
-	private eventsStream = new Stream<Event>();
-	private changesStream = new Stream<ZSet>();
-	private snapshotsStream = new Stream<ZSet>();
+	// Current state (always up-to-date)
+	private currentSnapshot = new ZSet();
+
+	// Bounded history for recent queries
+	// NOTE: this is an optimization and we lose time-travel and
+	// being able trun from the beginning :shrug:
+	private recentSnapshots: ZSet[] = [];
+	private recentEvents: Event[] = [];
+
+	// Configuration
+	private maxHistorySize = 100; // Keep last 100 states
+	private maxEventLogSize = 1000; // Keep last 1000 events
+
+	// Full event log (for complete replay if needed)
+	private events: Event[] = [];
+	private eventCount = 0;
+
 	private subscribers: ((snapshot: ZSet) => void)[] = [];
 
 	subscribe(callback: (snapshot: ZSet) => void) {
@@ -61,51 +74,56 @@ export class EventStore {
 	append(event: Event) {
 		const startTime = performance.now();
 
+		// Add to full event log
 		this.events.push(event);
-		const t = this.eventsStream.append(event);
+		this.eventCount++;
 
-		// Get previous snapshot (O(1))
-		const currentSnapshot = t > 0 ? this.snapshotsStream.get(t - 1) : new ZSet();
+		// Store current snapshot in recent history before updating
+		this.recentSnapshots.push(this.currentSnapshot);
+		this.recentEvents.push(event);
 
-		// Convert event to change (O(1))
-		const change = eventToZSetChange(event, currentSnapshot);
-		this.changesStream.set(t, change);
+		// Maintain bounded history
+		if (this.recentSnapshots.length > this.maxHistorySize) {
+			this.recentSnapshots.shift();
+			this.recentEvents.shift();
+		}
 
-		// ✅ EFFICIENT: Incremental update (O(|change|))
-		const newSnapshot = currentSnapshot.plus(change);
-		this.snapshotsStream.set(t, newSnapshot);
-		this.notify(); // Notify subscribers after state change
-		const endTime = performance.now();
+		// Apply change to current state (DBSP core)
+		const change = eventToZSetChange(event, this.currentSnapshot);
+		this.currentSnapshot = this.currentSnapshot.plus(change);
+
+		this.notify();
+
 		if (window.debug) {
-			console.log(`⚡ Event processed in ${(endTime - startTime).toFixed(2)}ms`);
 			console.log(
-				`📊 Total events: ${this.events.length}, DB size: ${newSnapshot.materialize.length}`
+				`⚡ Event ${this.eventCount} processed in ${(performance.now() - startTime).toFixed(2)}ms`
+			);
+			console.log(
+				`📊 Current: ${this.currentSnapshot.materialize.length} todos, History: ${this.recentSnapshots.length} snapshots`
 			);
 		}
 	}
 
-	getTodos(): Todo[] {
-		const latestTime = this.snapshotsStream.length - 1;
-		if (latestTime >= 0) {
-			return this.snapshotsStream.get(latestTime).materialize;
-		}
-		return [];
+	getCurrentSnapshot(): ZSet {
+		return this.currentSnapshot;
 	}
 
-	getCurrentSnapshot(): ZSet {
-		const latestTime = this.snapshotsStream.length - 1;
-		if (latestTime >= 0) {
-			return this.snapshotsStream.get(latestTime);
-		}
-		return new ZSet();
+	getTodos(): Todo[] {
+		return this.currentSnapshot.materialize;
+	}
+
+	getSnapshotAt(stepsBack: number): ZSet | null {
+		if (stepsBack === 0) return this.currentSnapshot;
+		const index = this.recentSnapshots.length - stepsBack;
+		return index >= 0 ? this.recentSnapshots[index] : null;
+	}
+
+	getRecentEvents(count: number = 10): Event[] {
+		return this.recentEvents.slice(-count);
 	}
 
 	getZSetDebug(): Map<string, number> {
-		const latestTime = this.snapshotsStream.length - 1;
-		if (latestTime >= 0) {
-			return this.snapshotsStream.get(latestTime).debug();
-		}
-		return new Map();
+		return this.getCurrentSnapshot().debug();
 	}
 }
 

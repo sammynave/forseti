@@ -3,16 +3,17 @@
 		todoDeletedEvent,
 		EventStore,
 		todoCreatedEvent,
-		todoToggledEvent,
-		todoStats,
-		activeTodos,
-		completedTodosCount
+		todoToggledEvent
 	} from '$lib/event-store.js';
 	import { ZSet } from '$lib/stream.js';
+	import { onMount } from 'svelte';
 
 	type Todo = { id: string; title: string; done: boolean };
 	let newTitle = $state('');
 
+	onMount(() => {
+		window.debug = true;
+	});
 	const eventStore = new EventStore();
 
 	let events = $state(JSON.stringify(eventStore.events, null, 2));
@@ -31,12 +32,6 @@
 
 	let todos = $derived<Todo[]>(currentSnapshot.materialize);
 	let alpha = $derived.by(() => todos.toSorted((a, b) => a.title.localeCompare(b.title)));
-	// Now derived views work with Svelte reactivity
-	let stats = $derived(todoStats(currentSnapshot));
-	let activeList = $derived(activeTodos(currentSnapshot));
-	let completedCount = $derived(completedTodosCount(currentSnapshot));
-
-	// $inspect(stats, activeList, completedCount);
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -53,8 +48,6 @@
 
 		// Z-set approach: just append event, Z-set handles incremental update
 		eventStore.append(todoCreatedEvent({ title }));
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
 
 		newTitle = '';
 	}
@@ -62,16 +55,11 @@
 	function toggleTodo(id: string) {
 		// Z-set approach: append event, get updated todos
 		eventStore.append(todoToggledEvent({ id }));
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
 	}
 
 	function deleteTodo(id: string) {
 		// Z-set approach: append event, get updated todos
 		eventStore.append(todoDeletedEvent({ id }));
-		todos = eventStore.getTodos();
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
 	}
 </script>
 
