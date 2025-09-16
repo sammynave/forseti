@@ -1,3 +1,5 @@
+import { ZSet } from './stream.js';
+
 type TodoCreatedEvent = {
 	type: 'TodoCreated';
 	id: string;
@@ -21,7 +23,7 @@ type Todo = {
 	done: boolean;
 };
 
-type Event = TodoCreatedEvent | TodoToggledEvent | TodoDeletedEvent;
+export type Event = TodoCreatedEvent | TodoToggledEvent | TodoDeletedEvent;
 
 export function todoCreatedEvent({ title }: { title: string }): TodoCreatedEvent {
 	return { type: 'TodoCreated', id: crypto.randomUUID(), title, timestamp: Date.now() };
@@ -31,7 +33,7 @@ export function todoToggledEvent({ id }: { id: string }): TodoToggledEvent {
 	return { type: 'TodoToggled', id, timestamp: Date.now() };
 }
 
-export function deleteToggledEvent({ id }: { id: string }): TodoDeletedEvent {
+export function todoDeletedEvent({ id }: { id: string }): TodoDeletedEvent {
 	return { type: 'TodoDeleted', id, timestamp: Date.now() };
 }
 
@@ -49,14 +51,14 @@ export class EventStore {
 			this.insert({ id: event.id, title: event.title, done: false }, 'todos');
 		} else if (event.type === 'TodoToggled') {
 			// Find the current todo and toggle it
-			const currentTodos = this.todos.materialize();
+			const currentTodos = this.todos.materialize;
 			const todo = currentTodos.find((t) => t.id === event.id);
 			if (todo) {
 				this.delete(todo, 'todos'); // Remove old version (weight -1)
 				this.insert({ ...todo, done: !todo.done }, 'todos'); // Add new version (weight +1)
 			}
 		} else if (event.type === 'TodoDeleted') {
-			const currentTodos = this.todos.materialize();
+			const currentTodos = this.todos.materialize;
 			const todo = currentTodos.find((t) => t.id === event.id);
 			if (todo) {
 				this.delete(todo, 'todos');
@@ -75,7 +77,7 @@ export class EventStore {
 	}
 
 	getTodos(): Todo[] {
-		return this.todos.materialize();
+		return this.todos.materialize;
 	}
 
 	getZSetDebug(): Map<string, number> {
@@ -83,28 +85,28 @@ export class EventStore {
 	}
 }
 
-class ZSet {
-	private data = new Map<string, number>();
+// New function in event-store.ts
+export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
+	const change = new ZSet();
 
-	// DBSP-style: add element with specified weight (default +1 for insertion)
-	add(item: unknown, weight: number = 1) {
-		const key = JSON.stringify(item);
-		const currentWeight = this.data.get(key) || 0;
-		const newWeight = currentWeight + weight;
+	if (event.type === 'TodoCreated') {
+		const todo = { id: event.id, title: event.title, done: false };
+		change.add(todo, 1);
+	} else if (event.type === 'TodoToggled') {
+		// Need current snapshot to know what to toggle
+		if (currentSnapshot) {
+			const currentTodos = currentSnapshot.materialize;
+			const todo = currentTodos.find((t: Todo) => t.id === event.id);
+			if (todo) {
+				change.add(todo, -1); // Remove old
+				change.add({ ...todo, done: !todo.done }, 1); // Add new
+			}
+		}
+	} else if (event.type === 'TodoDeleted') {
+		// Similar logic for delete
+	}
 
-		// DBSP semantics: keep all weights, including 0
-		this.data.set(key, newWeight);
-	}
-	// Convert to regular Todo array for display (only positive weights)
-	materialize(): Todo[] {
-		return Array.from(this.data.entries())
-			.filter(([_, weight]) => weight > 0)
-			.map(([todoJson, _]) => JSON.parse(todoJson));
-	}
-	/* END Maybe these should move */
-
-	// Debug: show the raw Z-set data
-	debug(): Map<string, number> {
-		return new Map(this.data);
-	}
+	return change;
 }
+
+// Then refactor EventStore to use streams + integration

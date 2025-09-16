@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		deleteToggledEvent,
+		todoDeletedEvent,
 		EventStore,
 		todoCreatedEvent,
 		todoToggledEvent
@@ -47,7 +47,7 @@
 
 	function deleteTodo(id: string) {
 		// Z-set approach: append event, get updated todos
-		eventStore.append(deleteToggledEvent({ id }));
+		eventStore.append(todoDeletedEvent({ id }));
 		todos = eventStore.getTodos();
 		events = JSON.stringify(eventStore.events, null, 2);
 		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
