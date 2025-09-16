@@ -42,8 +42,25 @@ export class EventStore {
 	private eventsStream = new Stream<Event>();
 	private changesStream = new Stream<ZSet>();
 	private snapshotsStream = new Stream<ZSet>();
+	private subscribers: ((snapshot: ZSet) => void)[] = [];
+
+	subscribe(callback: (snapshot: ZSet) => void) {
+		this.subscribers.push(callback);
+		// Return unsubscribe function
+		return () => {
+			const index = this.subscribers.indexOf(callback);
+			if (index > -1) this.subscribers.splice(index, 1);
+		};
+	}
+
+	private notify() {
+		const snapshot = this.getCurrentSnapshot();
+		this.subscribers.forEach((callback) => callback(snapshot));
+	}
 
 	append(event: Event) {
+		const startTime = performance.now();
+
 		this.events.push(event);
 		const t = this.eventsStream.append(event);
 
@@ -57,6 +74,14 @@ export class EventStore {
 		// ✅ EFFICIENT: Incremental update (O(|change|))
 		const newSnapshot = currentSnapshot.plus(change);
 		this.snapshotsStream.set(t, newSnapshot);
+		this.notify(); // Notify subscribers after state change
+		const endTime = performance.now();
+		if (window.debug) {
+			console.log(`⚡ Event processed in ${(endTime - startTime).toFixed(2)}ms`);
+			console.log(
+				`📊 Total events: ${this.events.length}, DB size: ${newSnapshot.materialize.length}`
+			);
+		}
 	}
 
 	getTodos(): Todo[] {
@@ -65,6 +90,14 @@ export class EventStore {
 			return this.snapshotsStream.get(latestTime).materialize;
 		}
 		return [];
+	}
+
+	getCurrentSnapshot(): ZSet {
+		const latestTime = this.snapshotsStream.length - 1;
+		if (latestTime >= 0) {
+			return this.snapshotsStream.get(latestTime);
+		}
+		return new ZSet();
 	}
 
 	getZSetDebug(): Map<string, number> {
@@ -78,6 +111,11 @@ export class EventStore {
 
 // New function in event-store.ts
 export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
+	if (window.debug) {
+		console.log(
+			`🔄 Processing event: ${event.type}, snapshot size: ${currentSnapshot?.materialize.length || 0}`
+		);
+	}
 	const change = new ZSet();
 
 	if (event.type === 'TodoCreated') {
@@ -103,7 +141,34 @@ export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
 		}
 	}
 
+	if (window.debug) {
+		console.log(`✅ Generated change with ${change.materialize.length} items`);
+	}
 	return change;
 }
 
-// Then refactor EventStore to use streams + integration
+export function completedTodosCount(todosSnapshot: ZSet): number {
+	return todosSnapshot.materialize.filter((todo) => todo.done).length;
+}
+
+export function activeTodos(todosSnapshot: ZSet): Todo[] {
+	return todosSnapshot.materialize.filter((todo) => !todo.done);
+}
+
+export function todoStats(todosSnapshot: ZSet): {
+	total: number;
+	completed: number;
+	active: number;
+	completionRate: number;
+} {
+	console.log(`📈 Computing stats for ${todosSnapshot.materialize.length} todos`);
+	const todos = todosSnapshot.materialize;
+	const completed = todos.filter((t) => t.done).length;
+	const total = todos.length;
+	return {
+		total,
+		completed,
+		active: total - completed,
+		completionRate: total > 0 ? completed / total : 0
+	};
+}

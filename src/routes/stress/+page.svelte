@@ -3,20 +3,56 @@
 		todoDeletedEvent,
 		EventStore,
 		todoCreatedEvent,
-		todoToggledEvent,
-		todoStats,
-		activeTodos,
-		completedTodosCount
+		todoToggledEvent
 	} from '$lib/event-store.js';
 	import { ZSet } from '$lib/stream.js';
+	import { onMount } from 'svelte';
 
 	type Todo = { id: string; title: string; done: boolean };
 	let newTitle = $state('');
 
 	const eventStore = new EventStore();
+	let loading = $state(true);
+	onMount(() => {
+		window.debug = false;
+		console.log('🚀 Starting 20,000 event stress test...');
+		const startTime = performance.now();
 
-	let events = $state(JSON.stringify(eventStore.events, null, 2));
-	let debug = $state(JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2));
+		// Create some initial todos
+		const todoIds: string[] = [];
+		for (let i = 0; i < 1000; i++) {
+			const event = todoCreatedEvent({ title: `Todo ${i}` });
+			eventStore.append(event);
+			todoIds.push(event.id);
+		}
+
+		// Mix of operations for remaining 9,000 events
+		for (let i = 1000; i < 5000; i++) {
+			const rand = Math.random();
+
+			if (rand < 0.4 && todoIds.length > 0) {
+				// 40% toggle existing todo
+				const randomId = todoIds[Math.floor(Math.random() * todoIds.length)];
+				eventStore.append(todoToggledEvent({ id: randomId }));
+			} else if (rand < 0.5 && todoIds.length > 0) {
+				// 10% delete existing todo
+				const randomIndex = Math.floor(Math.random() * todoIds.length);
+				const randomId = todoIds[randomIndex];
+				eventStore.append(todoDeletedEvent({ id: randomId }));
+				todoIds.splice(randomIndex, 1);
+			} else {
+				// 50% create new todo
+				const event = todoCreatedEvent({ title: `Stress Todo ${i}` });
+				eventStore.append(event);
+				todoIds.push(event.id);
+			}
+		}
+
+		const endTime = performance.now();
+		console.log(`✅ 20,000 events processed in ${(endTime - startTime).toFixed(2)}ms`);
+		loading = false;
+		window.debug = true;
+	});
 
 	let currentSnapshot = $state(new ZSet());
 
@@ -30,13 +66,6 @@
 	});
 
 	let todos = $derived<Todo[]>(currentSnapshot.materialize);
-	let alpha = $derived.by(() => todos.toSorted((a, b) => a.title.localeCompare(b.title)));
-	// Now derived views work with Svelte reactivity
-	let stats = $derived(todoStats(currentSnapshot));
-	let activeList = $derived(activeTodos(currentSnapshot));
-	let completedCount = $derived(completedTodosCount(currentSnapshot));
-
-	// $inspect(stats, activeList, completedCount);
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -53,29 +82,22 @@
 
 		// Z-set approach: just append event, Z-set handles incremental update
 		eventStore.append(todoCreatedEvent({ title }));
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
-
 		newTitle = '';
 	}
 
 	function toggleTodo(id: string) {
 		// Z-set approach: append event, get updated todos
 		eventStore.append(todoToggledEvent({ id }));
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
 	}
 
 	function deleteTodo(id: string) {
 		// Z-set approach: append event, get updated todos
 		eventStore.append(todoDeletedEvent({ id }));
-		todos = eventStore.getTodos();
-		events = JSON.stringify(eventStore.events, null, 2);
-		debug = JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2);
 	}
 </script>
 
 <div class="page">
+	{#if loading}<h1>loading</h1>{/if}
 	<div class="left">
 		<form onsubmit={submit}>
 			<label for="title">title</label>
@@ -84,7 +106,7 @@
 			<button type="submit">save</button>
 		</form>
 
-		{#each alpha as todo (todo.id)}
+		{#each todos as todo (todo.id)}
 			<div>
 				<label for={todo.id}>
 					<input
@@ -101,26 +123,11 @@
 			</div>
 		{/each}
 	</div>
-	<div class="right">
-		<h3>Current Todos (Z-set projection)</h3>
-		<pre>{JSON.stringify(todos, null, 2)}</pre>
-
-		<h3>Event Log</h3>
-		<pre>{events}</pre>
-
-		<h3>Z-set Debug (Raw weights)</h3>
-		<pre>{debug}</pre>
-	</div>
 </div>
 
 <style>
 	.page {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-	}
-	.right {
-		font-size: 12px;
-		display: flex;
-		word-wrap: break-word;
 	}
 </style>
