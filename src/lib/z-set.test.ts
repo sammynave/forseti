@@ -286,7 +286,9 @@ describe('ZSet older tests - remove dupes someday', () => {
 		zset2.add('item', -5);
 
 		const result = zset1.plus(zset2);
-		expect(result.data.get('"item"')).toBe(0); // Should be 0, not undefined
+		// DBSP finite support: zero weights should be removed
+		expect(result.data.has('"item"')).toBe(false);
+		expect(result.isZero()).toBe(true);
 	});
 
 	it('zero() returns empty Z-set', () => {
@@ -314,16 +316,14 @@ describe('ZSet older tests - remove dupes someday', () => {
 		const zset = new ZSet();
 		zset.add('todo1', 3);
 		zset.add('todo2', -1);
-		zset.add('todo3', 0);
+		// Note: adding weight 0 gets removed due to finite support
 
 		const negated = zset.negate();
 
-		expect(Array.from(negated.data.entries())).toStrictEqual([
+		expect(Array.from(negated.debug().entries())).toStrictEqual([
 			['"todo1"', -3],
-			['"todo2"', 1],
-			['"todo3"', -0]
+			['"todo2"', 1]
 		]);
-		expect(-0 === 0).toBe(true);
 	});
 
 	it('a + (-a) = zero (additive inverse property)', () => {
@@ -333,12 +333,10 @@ describe('ZSet older tests - remove dupes someday', () => {
 
 		const result = zset.plus(zset.negate());
 
-		// Should be all zeros (empty when materialized)
-		expect(Array.from(result.data.entries())).toStrictEqual([
-			['"todo1"', 0],
-			['"todo2"', 0]
-		]);
+		// DBSP finite support: zero weights are removed, so result should be empty
+		expect(Array.from(result.debug().entries())).toStrictEqual([]);
 		expect(result.materialize).toStrictEqual([]);
+		expect(result.isZero()).toBe(true);
 	});
 
 	it('double negation: -(-a) = a', () => {

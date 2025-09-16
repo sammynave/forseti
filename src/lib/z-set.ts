@@ -12,14 +12,20 @@ export class ZSet {
 		const currentWeight = this.data.get(key) || 0;
 		const newWeight = currentWeight + weight;
 
-		// DBSP semantics: keep all weights, including 0
-		this.data.set(key, newWeight);
-		// 🔧 FIX: Only index items with positive weights
-		if (typeof item === 'object' && item && 'id' in item) {
-			if (newWeight > 0) {
+		// DBSP finite support: only store non-zero weights
+		if (newWeight === 0) {
+			this.data.delete(key); // Remove zero weights (finite support)
+			// Also remove from index
+			if (typeof item === 'object' && item && 'id' in item) {
+				this.index.delete(item.id);
+			}
+		} else {
+			this.data.set(key, newWeight);
+			// Update index for positive weights only
+			if (typeof item === 'object' && item && 'id' in item && newWeight > 0) {
 				this.index.set(item.id, item);
-			} else {
-				this.index.delete(item.id); // Remove from index if weight <= 0
+			} else if (typeof item === 'object' && item && 'id' in item && newWeight < 0) {
+				this.index.delete(item.id); // Remove negative weights from index
 			}
 		}
 	}
@@ -36,15 +42,23 @@ export class ZSet {
 			const otherWeight = other.data.get(key) ?? 0;
 			const combinedWeight = thisWeight + otherWeight;
 
-			result.data.set(key, combinedWeight);
+			// Only store non-zero weights (finite support)
+			if (combinedWeight !== 0) {
+				result.data.set(key, combinedWeight);
 
-			const item = JSON.parse(key);
-			if (typeof item === 'object' && item && 'id' in item && combinedWeight > 0) {
-				result.index.set(item.id, item);
+				const item = JSON.parse(key);
+				if (typeof item === 'object' && item && 'id' in item && combinedWeight > 0) {
+					result.index.set(item.id, item);
+				}
 			}
 		}
 
 		return result;
+	}
+
+	isZero(): boolean {
+		// Zero Z-set has no elements with non-zero weights
+		return this.data.size === 0;
 	}
 
 	zero(): ZSet {
@@ -54,7 +68,10 @@ export class ZSet {
 	negate(): ZSet {
 		const result = new ZSet();
 		for (const [key, weight] of this.data) {
-			result.data.set(key, -weight);
+			if (weight !== 0) {
+				// Only store non-zero weights
+				result.data.set(key, -weight);
+			}
 		}
 		return result;
 	}
@@ -153,6 +170,14 @@ export class ZSet {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Set Union - SQL UNION operator
+	 * From Table 1: UNION = distinct(I1 + I2)
+	 */
+	union(other: ZSet): ZSet {
+		return this.plus(other).distinct();
 	}
 
 	// __Set Difference (-)__

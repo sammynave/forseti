@@ -156,11 +156,6 @@ export class Stream {
 	 * between the change stream and the materialized view.
 	 */
 	applyIncremental(queryFn: (stream: Stream) => Stream): Stream {
-		if (isBilinear) {
-			// For bilinear operators, we can apply optimizations from Theorem 3.4
-			// This would require more sophisticated analysis of the query function
-			// For now, fall back to standard approach
-		}
 		// Q^Δ = D ∘ Q ∘ I
 		const integrated = integrate(this); // I
 		const queryResult = queryFn(integrated); // Q
@@ -205,12 +200,20 @@ export class Stream {
 		otherKey: (item: any) => K
 	): Stream {
 		const result = new Stream();
-		const maxLength = Math.max(this.length, other.length);
 
 		// We need integrated versions of both streams
 		const integratedThis = integrate(this); // I(a)
 		const integratedOther = integrate(other); // I(b)
 		const delayedIntegratedOther = integratedOther.delay(); // z^(-1)(I(b))
+
+		// The result length should match the maximum of all intermediate streams
+		const maxLength = Math.max(
+			this.length,
+			other.length,
+			integratedThis.length,
+			integratedOther.length,
+			delayedIntegratedOther.length
+		);
 
 		for (let t = 0; t < maxLength; t++) {
 			// Get current values
@@ -240,11 +243,19 @@ export class Stream {
 	 */
 	liftCartesianProductIncremental(other: Stream): Stream {
 		const result = new Stream();
-		const maxLength = Math.max(this.length, other.length);
 
 		const integratedThis = integrate(this);
 		const integratedOther = integrate(other);
 		const delayedIntegratedOther = integratedOther.delay();
+
+		// The result length should match the maximum of all intermediate streams
+		const maxLength = Math.max(
+			this.length,
+			other.length,
+			integratedThis.length,
+			integratedOther.length,
+			delayedIntegratedOther.length
+		);
 
 		for (let t = 0; t < maxLength; t++) {
 			const thisZSet = t < this.length ? this.get(t) : new ZSet();
