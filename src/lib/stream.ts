@@ -1,5 +1,10 @@
 export class ZSet {
 	private data = new Map<string, number>();
+	private index = new Map<string, any>(); // Fast ID lookups
+
+	findById(id: string): any {
+		return this.index.get(id); // O(1)
+	}
 
 	// DBSP-style: add element with specified weight (default +1 for insertion)
 	add(item: unknown, weight: number = 1) {
@@ -9,6 +14,14 @@ export class ZSet {
 
 		// DBSP semantics: keep all weights, including 0
 		this.data.set(key, newWeight);
+		// 🔧 FIX: Only index items with positive weights
+		if (typeof item === 'object' && item && 'id' in item) {
+			if (newWeight > 0) {
+				this.index.set(item.id, item);
+			} else {
+				this.index.delete(item.id); // Remove from index if weight <= 0
+			}
+		}
 	}
 
 	plus(other: ZSet): ZSet {
@@ -24,6 +37,11 @@ export class ZSet {
 			const combinedWeight = thisWeight + otherWeight;
 
 			result.data.set(key, combinedWeight);
+
+			const item = JSON.parse(key);
+			if (typeof item === 'object' && item && 'id' in item && combinedWeight > 0) {
+				result.index.set(item.id, item);
+			}
 		}
 
 		return result;

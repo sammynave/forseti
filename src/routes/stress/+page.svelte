@@ -13,6 +13,7 @@
 
 	const eventStore = new EventStore();
 	let loading = $state(true);
+
 	onMount(() => {
 		window.debug = false;
 		console.log('🚀 Starting 20,000 event stress test...');
@@ -27,7 +28,7 @@
 		}
 
 		// Mix of operations for remaining 9,000 events
-		for (let i = 1000; i < 5000; i++) {
+		for (let i = 1000; i < 10000; i++) {
 			const rand = Math.random();
 
 			if (rand < 0.4 && todoIds.length > 0) {

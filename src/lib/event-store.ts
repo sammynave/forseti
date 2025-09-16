@@ -124,8 +124,8 @@ export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
 	} else if (event.type === 'TodoToggled') {
 		// Need current snapshot to know what to toggle
 		if (currentSnapshot) {
-			const currentTodos = currentSnapshot.materialize;
-			const todo = currentTodos.find((t: Todo) => t.id === event.id);
+			// Now uses O(1) lookups instead of O(k) scans
+			const todo = currentSnapshot?.findById(event.id);
 			if (todo) {
 				change.add(todo, -1); // Remove old
 				change.add({ ...todo, done: !todo.done }, 1); // Add new
@@ -133,8 +133,7 @@ export function eventToZSetChange(event: Event, currentSnapshot?: ZSet): ZSet {
 		}
 	} else if (event.type === 'TodoDeleted') {
 		if (currentSnapshot) {
-			const currentTodos = currentSnapshot.materialize;
-			const todo = currentTodos.find((t: Todo) => t.id === event.id);
+			const todo = currentSnapshot?.findById(event.id);
 			if (todo) {
 				change.add(todo, -1); // Remove the todo
 			}
