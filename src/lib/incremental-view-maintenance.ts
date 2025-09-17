@@ -180,23 +180,20 @@ export class IncrementalViewMaintenance {
 
 	/**
 	 * Apply incremental union (linear operator)
+	 *
+	 * TODO: Full union implementation requires:
+	 * - Multi-stream input handling
+	 * - Stream source resolution
+	 * - Time synchronization between different source streams
+	 *
+	 * For now, throw clear error to indicate this feature is planned but not implemented.
 	 */
 	private applyIncrementalUnion(deltaStream: Stream, operation: QueryOperation): Stream {
-		// Union is linear: (a + b)^Δ = a^Δ + b^Δ
-
-		if (!operation.otherQuery) {
-			throw new Error('Union operation requires otherQuery');
-		}
-
-		// Execute the other query incrementally on the same input
-		const otherOperations = operation.otherQuery.getOperations();
-		const otherResult = this.executeOptimizedIncremental(deltaStream, otherOperations);
-
-		// Union is addition followed by distinct (for sets)
-		// For SQL UNION: distinct(a + b)
-		// For SQL UNION ALL: just (a + b)
-		const combined = deltaStream.plus(otherResult);
-		return combined.liftDistinct(); // Remove duplicates for standard UNION
+		throw new Error(
+			'Union operation not yet implemented in incremental mode. ' +
+				'Union requires multi-stream input handling which is planned for a future release. ' +
+				'Current supported operations: filter, project, join, distinct.'
+		);
 	}
 
 	/**

@@ -99,20 +99,6 @@ describe('Query Builder - Basic Execution', () => {
 		// Should contain Alice's name only
 		expect(result.get(0).materialize).toEqual([{ name: 'Alice' }]);
 	});
-
-	it('handles union operation correctly', () => {
-		const stream1 = new Stream();
-		const stream2 = new Stream();
-
-		// Add different data to each stream
-		stream1.append(new ZSet([{ id: 1 }]));
-		stream2.append(new ZSet([{ id: 2 }]));
-
-		const result = Query.from(stream1).union(Query.from(stream2)).autoIncremental();
-
-		// Should contain both items
-		expect(integrate(result).get(0).materialize).toEqual([{ id: 1 }, { id: 2 }]);
-	});
 });
 
 describe('Algorithm 4.6 - Auto Incremental', () => {
