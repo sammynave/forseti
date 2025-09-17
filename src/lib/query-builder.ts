@@ -218,7 +218,8 @@ export class StreamingProcessor<T> {
 				result = result.distinct(); // applyOperationsToSnapshot
 			} else if (op.type === 'join') {
 				// For initial snapshot, join with other stream's latest state
-				const otherZSet = op.otherStream!.get(op.otherStream!.length - 1) || new ZSet();
+				const otherZSet =
+					op.otherStream!.length > 0 ? op.otherStream!.get(op.otherStream!.length - 1) : new ZSet();
 				result = result.join(otherZSet, op.thisKey!, op.otherKey!);
 			} else if (op.type === 'union') {
 				// For initial snapshot, union with other query's result from ITS OWN source stream
@@ -256,18 +257,24 @@ export class StreamingProcessor<T> {
 				processedChange = processedChange.distinct(); // processChange
 			} else if (op.type === 'join') {
 				// Join with the other stream's current state - need to get ZSet, not Stream
-				const otherZSet = op.otherStream!.get(op.otherStream!.length - 1) || new ZSet();
+				const otherZSet =
+					op.otherStream!.length > 0 ? op.otherStream!.get(op.otherStream!.length - 1) : new ZSet();
 				processedChange = processedChange.join(otherZSet, op.thisKey!, op.otherKey!);
 			} else if (op.type === 'union') {
-				// Get the other query's current state from ITS OWN source stream
+				// Process the ORIGINAL change through the other query branch as well
 				const otherSourceOp = op.otherQuery!.getOperations().find((o) => o.type === 'source');
 				if (otherSourceOp && otherSourceOp.stream && otherSourceOp.stream.length > 0) {
 					const otherSnapshot = otherSourceOp.stream.get(otherSourceOp.stream.length - 1);
-					const otherProcessor = op.otherQuery!.createStreamingProcessor(otherSnapshot);
-					const otherState = otherProcessor.getCurrentState();
-					processedChange = processedChange.union(otherState);
+
+					// Create a temporary processor for the other query branch
+					const tempOtherProcessor = op.otherQuery!.createStreamingProcessor(otherSnapshot);
+
+					// ✅ CRITICAL FIX: Process the original change through the other branch
+					const otherBranchResult = tempOtherProcessor.processChange(change);
+
+					// Union the current processed change with the other branch's processed result
+					processedChange = processedChange.union(otherBranchResult);
 				}
-				// If the other stream is empty, union with empty set (no change)
 			}
 
 			// Add other operations as needed
