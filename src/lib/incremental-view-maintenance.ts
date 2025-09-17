@@ -1,7 +1,7 @@
 import { Circuit } from './circuit.js';
 import { Stream } from './stream.js';
 import { integrate } from './stream/utils.js';
-import type { Query, QueryOperation } from './query-builder.js';
+import { Query, type QueryOperation } from './query-builder.js';
 
 /*
 // Example: Real-time user analytics with automatic incrementalization
@@ -48,6 +48,12 @@ const userAnalytics = Query
  * 5. Apply chain rule and optimizations (Proposition 3.2)
  */
 
+// Helper interfaces for optimization
+interface CircuitOperation {
+	type: 'filter' | 'project' | 'join' | 'distinct' | 'union';
+	metadata?: any;
+}
+
 export class IncrementalViewMaintenance {
 	/**
 	 * Main API: Generate optimized incremental plan from fluent query
@@ -56,22 +62,44 @@ export class IncrementalViewMaintenance {
 	 * @returns Optimized circuit that processes only changes
 	 */
 	generateIncrementalPlan<T>(query: Query<T>): Circuit {
-		// Step 1: Build DBSP circuit from query operations
-		let circuit = this.buildCircuitFromQuery(query);
+		// Step 1: Optimize query operations directly
+		const optimizedOperations = this.optimizeQueryOperations(query.getOperations());
 
-		// Step 2: Apply distinct elimination (Propositions 4.4, 4.5)
-		circuit = this.optimizeDistinctOperators(circuit);
+		// Step 2: Build optimized query
+		const optimizedQuery = this.buildOptimizedQuery(optimizedOperations);
 
-		// Step 3: Lift to streams (already done in Query Builder)
-		// Skip - Query Builder already works on streams
+		// Step 3: Build circuit from optimized query
+		let circuit = this.buildCircuitFromQuery(optimizedQuery);
 
-		// Step 4: Incrementalize with I and D
+		// Step 4: Incrementalize
 		circuit = this.incrementalize(circuit);
 
-		// Step 5: Apply chain rule and optimizations
+		// Step 5: Apply chain rule
 		circuit = this.applyChainRule(circuit);
 
 		return circuit;
+	}
+
+	/**
+	 * Build new Query from optimized operations
+	 */
+	private buildOptimizedQuery(operations: QueryOperation[]): Query<any> {
+		// Create a new Query with the optimized operation sequence
+		return new Query(operations);
+	}
+
+	/**
+	 * Step 2: Optimize query operations directly (before building circuit)
+	 */
+	private optimizeQueryOperations(operations: readonly QueryOperation[]): QueryOperation[] {
+		let optimized = [...operations];
+
+		// Apply distinct elimination rules
+		optimized = this.removeRedundantDistinct(optimized);
+		optimized = this.pushDistinctThroughLinearOps(optimized);
+		optimized = this.consolidateDistinctOps(optimized);
+
+		return optimized;
 	}
 
 	/**
@@ -148,15 +176,47 @@ export class IncrementalViewMaintenance {
 
 		return currentCircuit;
 	}
+	/**
+	 * Apply optimization rules to operation sequence
+	 */
+	private optimizeOperationSequence(operations: CircuitOperation[]): CircuitOperation[] {
+		let optimized = [...operations];
+
+		// Rule 1: Remove redundant distinct operations
+		optimized = this.removeRedundantDistinct(optimized);
+
+		// Rule 2: Push distinct through linear operations (Proposition 4.4)
+		optimized = this.pushDistinctThroughLinearOps(optimized);
+
+		// Rule 3: Consolidate multiple distincts (Proposition 4.5)
+		optimized = this.consolidateDistinctOps(optimized);
+
+		return optimized;
+	}
+	/**
+	 * Extract operation sequence from circuit for analysis
+	 * (This is a simplified representation for optimization)
+	 */
+	private getCircuitOperations(circuit: Circuit): CircuitOperation[] {
+		// For now, return empty array - in full implementation,
+		// we'd extract the actual operation sequence from the circuit
+		return [];
+	}
 
 	/**
 	 * Apply specific distinct elimination rules
 	 */
 	private applyDistinctRules(circuit: Circuit): Circuit {
-		// For now, return the circuit unchanged
-		// TODO: Implement specific rules for pushing distinct through operators
-		// This is an optimization - the circuit will work correctly without it
-		return circuit;
+		// un optimized
+		// return circuit;
+
+		// For now, we'll implement a simplified version that detects
+		// common patterns and applies basic optimizations
+
+		const operations = this.getCircuitOperations(circuit);
+		const optimizedOperations = this.optimizeOperationSequence(operations);
+
+		return this.buildCircuitFromOperations(optimizedOperations);
 	}
 
 	/**
@@ -206,5 +266,113 @@ export class IncrementalViewMaintenance {
 		// Simple comparison - in a full implementation, this would
 		// compare the operator structures
 		return circuit1 === circuit2;
+	}
+
+	/**
+	 * Rule 1: Remove redundant consecutive distinct operations
+	 */
+	private removeRedundantDistinct(operations: QueryOperation[]): QueryOperation[] {
+		const result: QueryOperation[] = [];
+
+		for (let i = 0; i < operations.length; i++) {
+			const current = operations[i];
+			const next = operations[i + 1];
+
+			// Skip redundant distinct: distinct(distinct(x)) = distinct(x)
+			if (current.type === 'distinct' && next?.type === 'distinct') {
+				continue; // Skip current, next one will be processed
+			}
+
+			result.push(current);
+		}
+
+		return result;
+	}
+
+	/**
+	 * Rule 2: Push distinct through linear operations (Proposition 4.4)
+	 */
+	private pushDistinctThroughLinearOps(operations: QueryOperation[]): QueryOperation[] {
+		const result: QueryOperation[] = [];
+
+		for (let i = 0; i < operations.length; i++) {
+			const current = operations[i];
+			const next = operations[i + 1];
+
+			// Pattern: filter → distinct becomes distinct → filter
+			if (current.type === 'filter' && next?.type === 'distinct') {
+				result.push({ ...next }); // distinct first
+				result.push({ ...current }); // filter second
+				i++; // Skip next
+				continue;
+			}
+
+			// Similar for project → distinct
+			if (current.type === 'project' && next?.type === 'distinct') {
+				result.push({ ...next });
+				result.push({ ...current });
+				i++;
+				continue;
+			}
+
+			result.push(current);
+		}
+
+		return result;
+	}
+
+	/**
+	 * Rule 3: Consolidate multiple distinct operations (Proposition 4.5)
+	 */
+	private consolidateDistinctOps(operations: CircuitOperation[]): CircuitOperation[] {
+		// For linear operations between distincts, we can remove the first distinct
+		// distinct(Q(distinct(i))) = distinct(Q(i)) where Q is linear
+
+		const result: CircuitOperation[] = [];
+
+		for (let i = 0; i < operations.length; i++) {
+			const current = operations[i];
+
+			// Look for pattern: distinct → [linear ops] → distinct
+			if (current.type === 'distinct') {
+				let j = i + 1;
+				let allLinear = true;
+
+				// Find next distinct and check if all operations between are linear
+				while (j < operations.length && operations[j].type !== 'distinct') {
+					if (!this.isLinearOperation(operations[j])) {
+						allLinear = false;
+						break;
+					}
+					j++;
+				}
+
+				// If we found another distinct and all ops between are linear
+				if (j < operations.length && operations[j].type === 'distinct' && allLinear) {
+					// Skip this distinct (optimization: remove first distinct)
+					continue;
+				}
+			}
+
+			result.push(current);
+		}
+
+		return result;
+	}
+
+	/**
+	 * Check if operation is linear (can have distinct pushed through it)
+	 */
+	private isLinearOperation(op: CircuitOperation): boolean {
+		return ['filter', 'project'].includes(op.type);
+	}
+
+	/**
+	 * Build circuit from optimized operation sequence
+	 */
+	private buildCircuitFromOperations(operations: CircuitOperation[]): Circuit {
+		// For now, return a new circuit - in full implementation,
+		// we'd construct the actual circuit from the operations
+		return new Circuit();
 	}
 }

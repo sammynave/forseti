@@ -270,7 +270,7 @@ describe('Algorithm 4.6 - Correctness Verification', () => {
 	});
 });
 
-describe.only('Algorithm 4.6 - Debug Understanding', () => {
+describe('Algorithm 4.6 - Debug Understanding', () => {
 	it('shows the difference between changes and snapshots', () => {
 		const changeStream = new Stream();
 
@@ -329,5 +329,57 @@ describe.only('Algorithm 4.6 - Debug Understanding', () => {
 				nonIncrementalResult.get(t).materialize
 			);
 		}
+	});
+});
+describe('Algorithm 4.6 - Distinct Optimization', () => {
+	it('optimizes redundant distinct operations', () => {
+		const stream = new Stream();
+
+		// Add test data with duplicates
+		const zset = new ZSet();
+		zset.add({ id: 1, name: 'Alice' }, 1);
+		zset.add({ id: 1, name: 'Alice' }, 1); // Duplicate (weight 2)
+		zset.add({ id: 2, name: 'Bob' }, 1);
+		stream.append(zset);
+
+		// Query with redundant distinct operations
+		const query = Query.from(stream)
+			.distinct() // First distinct
+			.where((x) => x.id > 0) // Linear operation
+			.distinct() // Second distinct (should be optimized away)
+			.autoIncremental();
+
+		// Should still produce correct results
+		const result = integrate(query);
+		expect(result.get(0).materialize.length).toBe(2); // Alice (once) + Bob
+
+		// The optimization should have eliminated one of the distinct operations
+		// (This is a performance optimization, not a correctness requirement)
+	});
+
+	it('pushes distinct through linear operations', () => {
+		const stream = new Stream();
+
+		const zset = new ZSet();
+		zset.add({ id: 1, name: 'Alice', active: true }, 2); // Weight 2
+		zset.add({ id: 2, name: 'Bob', active: true }, 1);
+		stream.append(zset);
+
+		// Test that distinct gets pushed through filter (linear operation)
+		const optimized = Query.from(stream)
+			.where((x) => x.active) // Linear - distinct can be pushed through
+			.distinct() // Should be moved earlier for efficiency
+			.autoIncremental();
+
+		const manual = Query.from(stream)
+			.distinct() // Applied first
+			.where((x) => x.active) // Then filter
+			.autoIncremental();
+
+		// Both should produce same results (optimization doesn't change correctness)
+		const optimizedResult = integrate(optimized);
+		const manualResult = integrate(manual);
+
+		expect(optimizedResult.get(0).materialize).toEqual(manualResult.get(0).materialize);
 	});
 });

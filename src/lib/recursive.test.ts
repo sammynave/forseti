@@ -136,7 +136,7 @@ describe('Recursive Query Infrastructure (DBSP Section 5)', () => {
 	});
 
 	describe('Semi-Naïve Fixed-Point Computation', () => {
-		it.only('optimizes computation using deltas', () => {
+		it('optimizes computation using deltas', () => {
 			const initial = new ZSet();
 			initial.add('a', 1);
 
