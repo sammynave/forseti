@@ -3,6 +3,7 @@ import { Query } from './query-builder.js';
 import { Stream } from './stream.js';
 import { ZSet } from './z-set.js';
 import { integrate } from './stream/utils.js';
+import { EventStore, todoCreatedEvent, todoToggledEvent } from './event-store.js';
 
 describe('Query Builder - Basic Functionality', () => {
 	it('can create a query chain', () => {
@@ -1205,5 +1206,62 @@ describe('StreamingProcessor - Most Complex Query', () => {
 		console.log('🎯 ULTRA-COMPLEX QUERY EXECUTED SUCCESSFULLY!');
 		console.log('Operations count:', masterQuery.getOperations().length);
 		console.log('Result:', updatedResult.materialize);
+	});
+});
+
+describe('DBSP Mathematical Properties', () => {
+	// Helper function to create large initial datasets
+	function createLargeDataset(size: number): EventStore {
+		const eventStore = new EventStore();
+
+		// Create initial todos
+		for (let i = 0; i < size; i++) {
+			const isCompleted = i % 3 === 0; // Every 3rd todo is completed
+			eventStore.append(todoCreatedEvent({ title: `Todo ${i}` }));
+
+			if (isCompleted) {
+				// Get the last created todo's ID and toggle it
+				const todos = eventStore.getTodos();
+				const lastTodo = todos[todos.length - 1];
+				eventStore.append(todoToggledEvent({ id: lastTodo.id }));
+			}
+		}
+
+		return eventStore;
+	}
+
+	it('Verify Linear Operator Property - Filter', () => {
+		// Test that σ^Δ = σ (Theorem 3.3 from paper)
+		const eventStore = createLargeDataset(100);
+
+		const processor = Query.from<Todo>()
+			.where((todo: Todo) => todo.done)
+			.createStreamingProcessor(eventStore.getCurrentSnapshot());
+
+		// Apply two separate changes
+		const change1 = new ZSet();
+		change1.add({ id: '1', title: 'Test 1', done: true }, 1);
+
+		const change2 = new ZSet();
+		change2.add({ id: '2', title: 'Test 2', done: true }, 1);
+
+		// Test linearity: f(a + b) = f(a) + f(b)
+		const combined = change1.plus(change2);
+
+		processor.processChange(change1);
+		const state1 = processor.getCurrentState();
+
+		processor.processChange(change2);
+		const finalState = processor.getCurrentState();
+
+		// Create fresh processor for combined test
+		const processor2 = Query.from<Todo>()
+			.where((todo: Todo) => todo.done)
+			.createStreamingProcessor(eventStore.getCurrentSnapshot());
+
+		processor2.processChange(combined);
+		const combinedState = processor2.getCurrentState();
+
+		expect(finalState.materialize.length).toBe(combinedState.materialize.length);
 	});
 });

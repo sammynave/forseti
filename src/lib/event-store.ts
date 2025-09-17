@@ -84,7 +84,6 @@ export class EventStore {
 		};
 	}
 	private notifyChanges(change: ZSet) {
-		console.log('es sub', change);
 		this.changeSubscribers.forEach((callback) => callback(change));
 	}
 
@@ -205,7 +204,7 @@ export function todoStats(todosSnapshot: ZSet): {
 	active: number;
 	completionRate: number;
 } {
-	console.log(`📈 Computing stats for ${todosSnapshot.materialize.length} todos`);
+	// console.log(`📈 Computing stats for ${todosSnapshot.materialize.length} todos`);
 	const todos = todosSnapshot.materialize;
 	const completed = todos.filter((t) => t.done).length;
 	const total = todos.length;
