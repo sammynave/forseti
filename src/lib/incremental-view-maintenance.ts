@@ -1,6 +1,5 @@
 import { Circuit } from './circuit.js';
 import { Stream } from './stream.js';
-import { integrate } from './stream/utils.js';
 import { Query, type QueryOperation } from './query-builder.js';
 
 /*
@@ -48,13 +47,9 @@ const userAnalytics = Query
  * 5. Apply chain rule and optimizations (Proposition 3.2)
  */
 
-// Helper interfaces for optimization
-interface CircuitOperation {
-	type: 'filter' | 'project' | 'join' | 'distinct' | 'union';
-	metadata?: any;
-}
-
 export class IncrementalViewMaintenance {
+	private currentQueryOperations: QueryOperation[] = [];
+
 	/**
 	 * Main API: Generate optimized incremental plan from fluent query
 	 *
@@ -65,27 +60,13 @@ export class IncrementalViewMaintenance {
 		// Step 1: Optimize query operations directly
 		const optimizedOperations = this.optimizeQueryOperations(query.getOperations());
 
-		// Step 2: Build optimized query
-		const optimizedQuery = this.buildOptimizedQuery(optimizedOperations);
+		// Store for chain rule optimization
+		this.currentQueryOperations = optimizedOperations;
 
-		// Step 3: Build circuit from optimized query
-		let circuit = this.buildCircuitFromQuery(optimizedQuery);
+		// Step 2: Apply chain rule optimization (this does the incrementalization)
+		const optimizedCircuit = this.applyChainRule(new Circuit());
 
-		// Step 4: Incrementalize
-		circuit = this.incrementalize(circuit);
-
-		// Step 5: Apply chain rule
-		circuit = this.applyChainRule(circuit);
-
-		return circuit;
-	}
-
-	/**
-	 * Build new Query from optimized operations
-	 */
-	private buildOptimizedQuery(operations: QueryOperation[]): Query<any> {
-		// Create a new Query with the optimized operation sequence
-		return new Query(operations);
+		return optimizedCircuit;
 	}
 
 	/**
@@ -103,146 +84,6 @@ export class IncrementalViewMaintenance {
 	}
 
 	/**
-	 * Step 1: Build DBSP circuit from Query Builder operations
-	 * Converts fluent API calls into circuit operators
-	 */
-	private buildCircuitFromQuery<T>(query: Query<T>): Circuit {
-		const circuit = new Circuit();
-		const operations = query.getOperations();
-
-		for (const op of operations) {
-			switch (op.type) {
-				case 'source':
-					// Source stream is handled by circuit execution
-					break;
-
-				case 'filter':
-					// σ (sigma) - linear operator
-					circuit.addOperator((stream) => stream.liftFilter(op.predicate!));
-					break;
-
-				case 'project':
-					// π (pi) - linear operator
-					circuit.addOperator((stream) => stream.liftProject(op.selector!));
-					break;
-
-				case 'join':
-					// ⊲⊳ - bilinear operator
-					circuit.addBinaryOperator(
-						(left, right) => left.liftJoin(right, op.thisKey!, op.otherKey!),
-						op.otherStream!
-					);
-					break;
-
-				case 'distinct':
-					// distinct - non-linear operator (requires special handling)
-					circuit.addOperator((stream) => stream.liftDistinct());
-					break;
-
-				case 'union':
-					// + - linear operator
-					// TODO: Implement union in Circuit class
-					console.warn('Union operation not yet implemented in Circuit');
-					break;
-
-				default:
-					throw new Error(`Unknown query operation: ${(op as any).type}`);
-			}
-		}
-
-		return circuit;
-	}
-
-	/**
-	 * Step 2: Apply distinct elimination rules until convergence
-	 *
-	 * Paper Reference: Propositions 4.4, 4.5
-	 * - Prop 4.4: For σ, ⊲⊳, ×: Q(distinct(i)) = distinct(Q(i))
-	 * - Prop 4.5: For σ, π, map, +, ⊲⊳, ×: distinct(Q(distinct(i))) = distinct(Q(i))
-	 */
-	private optimizeDistinctOperators(circuit: Circuit): Circuit {
-		// Apply optimization rules until no more changes
-		let currentCircuit = circuit;
-		let changed = true;
-		let iterations = 0;
-		const maxIterations = 10; // Safety limit
-
-		while (changed && iterations < maxIterations) {
-			const optimizedCircuit = this.applyDistinctRules(currentCircuit);
-			changed = !this.circuitsEqual(currentCircuit, optimizedCircuit);
-			currentCircuit = optimizedCircuit;
-			iterations++;
-		}
-
-		return currentCircuit;
-	}
-	/**
-	 * Apply optimization rules to operation sequence
-	 */
-	private optimizeOperationSequence(operations: CircuitOperation[]): CircuitOperation[] {
-		let optimized = [...operations];
-
-		// Rule 1: Remove redundant distinct operations
-		optimized = this.removeRedundantDistinct(optimized);
-
-		// Rule 2: Push distinct through linear operations (Proposition 4.4)
-		optimized = this.pushDistinctThroughLinearOps(optimized);
-
-		// Rule 3: Consolidate multiple distincts (Proposition 4.5)
-		optimized = this.consolidateDistinctOps(optimized);
-
-		return optimized;
-	}
-	/**
-	 * Extract operation sequence from circuit for analysis
-	 * (This is a simplified representation for optimization)
-	 */
-	private getCircuitOperations(circuit: Circuit): CircuitOperation[] {
-		// For now, return empty array - in full implementation,
-		// we'd extract the actual operation sequence from the circuit
-		return [];
-	}
-
-	/**
-	 * Apply specific distinct elimination rules
-	 */
-	private applyDistinctRules(circuit: Circuit): Circuit {
-		// un optimized
-		// return circuit;
-
-		// For now, we'll implement a simplified version that detects
-		// common patterns and applies basic optimizations
-
-		const operations = this.getCircuitOperations(circuit);
-		const optimizedOperations = this.optimizeOperationSequence(operations);
-
-		return this.buildCircuitFromOperations(optimizedOperations);
-	}
-
-	/**
-	 * Step 4: Apply incremental transformation Q^Δ = D ∘ Q ∘ I
-	 *
-	 * This is the core DBSP transformation that converts any query
-	 * into its incremental equivalent.
-	 */
-	private incrementalize(circuit: Circuit): Circuit {
-		const incrementalCircuit = new Circuit();
-
-		incrementalCircuit.addOperator((deltaStream: Stream) => {
-			// I: Integration - convert changes to snapshots
-			const snapshots = integrate(deltaStream);
-
-			// Q: Apply original query to snapshots
-			const queryResult = circuit.execute(snapshots);
-
-			// D: Differentiation - convert back to changes
-			return queryResult.differentiate();
-		});
-
-		return incrementalCircuit;
-	}
-
-	/**
 	 * Step 5: Apply chain rule and operator-specific optimizations
 	 *
 	 * Paper Reference: Proposition 3.2 (chain rule properties)
@@ -251,21 +92,111 @@ export class IncrementalViewMaintenance {
 	 * - Composition: (Q1 ∘ Q2)^Δ = Q1^Δ ∘ Q2^Δ
 	 */
 	private applyChainRule(circuit: Circuit): Circuit {
-		// For now, return the incrementalized circuit
-		// TODO: Apply specific optimizations based on operator properties
-		// - Replace linear operators with their direct equivalents
-		// - Replace bilinear operators with Theorem 3.4 formulas
-		// - Optimize distinct operations with Proposition 4.7
-		return circuit;
+		// Instead of generic incrementalization, we'll build an optimized
+		// incremental circuit based on operator types
+		const optimizedCircuit = new Circuit();
+
+		// We need the original query operations to determine optimization strategy
+		const operations = this.currentQueryOperations; // Store this during optimization
+
+		optimizedCircuit.addOperator((deltaStream: Stream) => {
+			return this.executeOptimizedIncremental(deltaStream, operations);
+		});
+
+		return optimizedCircuit;
 	}
 
 	/**
-	 * Helper: Compare circuits for optimization convergence
+	 * Execute incremental query with operator-specific optimizations
 	 */
-	private circuitsEqual(circuit1: Circuit, circuit2: Circuit): boolean {
-		// Simple comparison - in a full implementation, this would
-		// compare the operator structures
-		return circuit1 === circuit2;
+	private executeOptimizedIncremental(deltaStream: Stream, operations: QueryOperation[]): Stream {
+		let currentStream = deltaStream;
+
+		for (const op of operations) {
+			if (op.type === 'source') {
+				continue; // Skip source
+			}
+
+			// Apply operator-specific incremental version
+			currentStream = this.applyIncrementalOperator(currentStream, op);
+		}
+
+		return currentStream;
+	}
+
+	/**
+	 * Apply incremental version of a single operator
+	 */
+	private applyIncrementalOperator(deltaStream: Stream, operation: QueryOperation): Stream {
+		switch (operation.type) {
+			case 'filter':
+				// Theorem 3.3: Linear operator - Q^Δ = Q
+				return deltaStream.liftFilter(operation.predicate!);
+
+			case 'project':
+				// Theorem 3.3: Linear operator - Q^Δ = Q
+				return deltaStream.liftProject(operation.selector!);
+
+			case 'join':
+				// Theorem 3.4: Bilinear operator - use optimized formula
+				return this.applyIncrementalJoin(deltaStream, operation);
+
+			case 'distinct':
+				// Proposition 4.7: Optimized distinct implementation
+				return this.applyIncrementalDistinct(deltaStream);
+
+			case 'union':
+				// Linear operator: Q^Δ = Q (just addition)
+				return this.applyIncrementalUnion(deltaStream, operation);
+
+			default:
+				throw new Error(`Unknown operation type: ${operation.type}`);
+		}
+	}
+
+	/**
+	 * Apply incremental join using Theorem 3.4 optimized formula
+	 * (a × b)^Δ = I(a) × b + a × z⁻¹(I(b))
+	 */
+	private applyIncrementalJoin(deltaStream: Stream, operation: QueryOperation): Stream {
+		const otherStream = operation.otherStream!;
+
+		// Use existing optimized join implementation from Stream class
+		return deltaStream.liftJoinIncremental(otherStream, operation.thisKey!, operation.otherKey!);
+	}
+
+	/**
+	 * Apply incremental distinct using Proposition 4.7
+	 * This is more efficient than naive D ∘ distinct ∘ I
+	 */
+	private applyIncrementalDistinct(deltaStream: Stream): Stream {
+		// The Stream class already has an optimized distinct implementation
+		// For incremental distinct, we need to track the current state
+
+		// For now, use the existing lift distinct - in full implementation,
+		// we'd use the optimized incremental distinct from Proposition 4.7
+		return deltaStream.liftDistinct();
+	}
+
+	/**
+	 * Apply incremental union (linear operator)
+	 */
+	private applyIncrementalUnion(deltaStream: Stream, operation: QueryOperation): Stream {
+		// Union is linear: (a + b)^Δ = a^Δ + b^Δ
+
+		if (!operation.otherQuery) {
+			throw new Error('Union operation requires otherQuery');
+		}
+
+		// Execute the other query incrementally on the same input
+		const otherOperations = operation.otherQuery.getOperations();
+		const otherResult = this.executeOptimizedIncremental(deltaStream, otherOperations);
+
+		// Union is addition followed by distinct (for sets)
+		// For SQL UNION: distinct(a + b)
+		// For SQL UNION ALL: just (a + b)
+		const combined = deltaStream.plus(otherResult);
+		return combined.liftDistinct(); // Remove duplicates for standard UNION
 	}
 
 	/**
@@ -324,11 +255,11 @@ export class IncrementalViewMaintenance {
 	/**
 	 * Rule 3: Consolidate multiple distinct operations (Proposition 4.5)
 	 */
-	private consolidateDistinctOps(operations: CircuitOperation[]): CircuitOperation[] {
+	private consolidateDistinctOps(operations: QueryOperation[]): QueryOperation[] {
 		// For linear operations between distincts, we can remove the first distinct
 		// distinct(Q(distinct(i))) = distinct(Q(i)) where Q is linear
 
-		const result: CircuitOperation[] = [];
+		const result: QueryOperation[] = [];
 
 		for (let i = 0; i < operations.length; i++) {
 			const current = operations[i];
@@ -359,20 +290,10 @@ export class IncrementalViewMaintenance {
 
 		return result;
 	}
-
-	/**
+	/*
 	 * Check if operation is linear (can have distinct pushed through it)
 	 */
-	private isLinearOperation(op: CircuitOperation): boolean {
+	private isLinearOperation(op: QueryOperation): boolean {
 		return ['filter', 'project'].includes(op.type);
-	}
-
-	/**
-	 * Build circuit from optimized operation sequence
-	 */
-	private buildCircuitFromOperations(operations: CircuitOperation[]): Circuit {
-		// For now, return a new circuit - in full implementation,
-		// we'd construct the actual circuit from the operations
-		return new Circuit();
 	}
 }

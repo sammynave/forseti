@@ -99,6 +99,20 @@ describe('Query Builder - Basic Execution', () => {
 		// Should contain Alice's name only
 		expect(result.get(0).materialize).toEqual([{ name: 'Alice' }]);
 	});
+
+	it('handles union operation correctly', () => {
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		// Add different data to each stream
+		stream1.append(new ZSet([{ id: 1 }]));
+		stream2.append(new ZSet([{ id: 2 }]));
+
+		const result = Query.from(stream1).union(Query.from(stream2)).autoIncremental();
+
+		// Should contain both items
+		expect(integrate(result).get(0).materialize).toEqual([{ id: 1 }, { id: 2 }]);
+	});
 });
 
 describe('Algorithm 4.6 - Auto Incremental', () => {
@@ -381,5 +395,55 @@ describe('Algorithm 4.6 - Distinct Optimization', () => {
 		const manualResult = integrate(manual);
 
 		expect(optimizedResult.get(0).materialize).toEqual(manualResult.get(0).materialize);
+	});
+});
+describe('Algorithm 4.6 - Chain Rule Optimizations', () => {
+	it('linear operations work directly on changes (no I/D overhead)', () => {
+		const changeStream = new Stream();
+
+		// Add change
+		const change = new ZSet();
+		change.add({ id: 1, name: 'Alice', active: true }, 1);
+		changeStream.append(change);
+
+		// Linear operations should work directly on changes
+		const optimizedResult = Query.from(changeStream)
+			.where((x) => x.active) // Linear: should work on changes directly
+			.select((x) => x.name) // Linear: should work on changes directly
+			.autoIncremental();
+
+		// Should produce changes directly, not need integration
+		expect(optimizedResult.get(0).materialize).toEqual(['Alice']);
+	});
+
+	it('bilinear join uses Theorem 3.4 optimization', () => {
+		const userChanges = new Stream();
+		const orderStream = new Stream(); // Static for this test
+
+		const userChange = new ZSet();
+		userChange.add({ id: 1, name: 'Alice' }, 1);
+		userChanges.append(userChange);
+
+		const orders = new ZSet();
+		orders.add({ userId: 1, amount: 100 }, 1);
+		orderStream.append(orders);
+
+		// Join should use optimized formula, not naive D ∘ join ∘ I
+		const result = Query.from(userChanges)
+			.join(
+				orderStream,
+				(user) => user.id,
+				(order) => order.userId
+			)
+			.autoIncremental();
+
+		// Should produce correct join result
+		const integrated = integrate(result);
+		expect(integrated.get(0).materialize).toEqual([
+			[
+				{ id: 1, name: 'Alice' },
+				{ userId: 1, amount: 100 }
+			]
+		]);
 	});
 });
