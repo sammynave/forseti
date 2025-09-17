@@ -102,6 +102,20 @@ import { ZSet } from './z-set.js';
 export class Circuit {
 	private operators: ((input: Stream) => Stream)[] = [];
 
+	static fromQueryOperations(operations: QueryOperation[]): Circuit {
+		const circuit = new Circuit();
+
+		for (const op of operations) {
+			circuit.addOperationFromQuery(op);
+		}
+
+		return circuit;
+	}
+
+	private addOperationFromQuery(op: QueryOperation): void {
+		// Convert query builder operations to circuit operators
+	}
+
 	// Add an operator to the circuit
 	addOperator(op: (input: Stream) => Stream): Circuit {
 		this.operators.push(op);

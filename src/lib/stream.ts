@@ -1,12 +1,26 @@
 // Stream<A> represents a function ℕ → A (natural numbers to values of type A)
 // s[t] gives the value at time t
 
+import { Query } from './query-builder.js';
 import { integrate } from './stream/utils.js';
 import { ZSet } from './z-set.js';
+
+/*
+// ex:
+const result = myStream
+  .asQuery<User>()
+  .where(user => user.active)
+  .select(user => user.name)
+  .autoIncremental();
+	*/
 
 // Following DBSP Definition 2.1
 export class Stream {
 	private values: ZSet[] = [];
+
+	public asQuery<T>(): Query<T> {
+		return Query.from<T>(this);
+	}
 
 	get(t: number): ZSet {
 		if (t < 0 || !Number.isInteger(t)) {
