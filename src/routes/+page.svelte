@@ -6,7 +6,8 @@
 		todoToggledEvent
 	} from '$lib/event-store.js';
 	import { ZSet } from '$lib/z-set.js';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { Query } from '$lib/query-builder.js';
 
 	type Todo = { id: string; title: string; done: boolean };
 	let newTitle = $state('');
@@ -16,22 +17,43 @@
 	});
 	const eventStore = new EventStore();
 
-	let events = $state(JSON.stringify(eventStore.events, null, 2));
-	let debug = $state(JSON.stringify(Object.fromEntries(eventStore.getZSetDebug()), null, 2));
-
 	let currentSnapshot = $state(new ZSet());
+	let completedTodos = $state<Todo[]>([]);
 
 	// Subscribe to EventStore changes
-	$effect(() => {
-		const unsubscribe = eventStore.subscribe((snapshot) => {
-			currentSnapshot = snapshot;
-		});
-
-		return unsubscribe; // Cleanup
+	const unsubscribe = eventStore.subscribe((snapshot) => {
+		currentSnapshot = snapshot;
 	});
+
+	// Create streaming processor
+	const completedTodosProcessor = Query.from<Todo>()
+		.where((todo: Todo) => todo.done)
+		.createStreamingProcessor();
+
+	const unsubscribeChanges = eventStore.subscribeToChanges((change) => {
+		completedTodosProcessor.processChange(change);
+		// Update UI with current state
+		completedTodos = completedTodosProcessor.getCurrentState().materialize;
+	});
+
+	onDestroy(() => {
+		unsubscribeChanges();
+		unsubscribe();
+	});
+
+	// 	return unsubscribe; // Cleanup
+	// });
 
 	let todos = $derived<Todo[]>(currentSnapshot.materialize);
 	let alpha = $derived.by(() => todos.toSorted((a, b) => a.title.localeCompare(b.title)));
+
+	/* TODO */
+	/*
+	 * let's take advantage of IncrementalViewMaintenance by creating
+	 * Query that filters todos that are done.
+	 *
+	 * we will iterate over `completedTodos` in the html below
+	 */
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -91,13 +113,22 @@
 	</div>
 	<div class="right">
 		<h3>Current Todos (Z-set projection)</h3>
-		<pre>{JSON.stringify(todos, null, 2)}</pre>
-
-		<h3>Event Log</h3>
-		<pre>{events}</pre>
-
-		<h3>Z-set Debug (Raw weights)</h3>
-		<pre>{debug}</pre>
+		{#each completedTodos as todo (todo.id)}
+			<div>
+				<label for={todo.id}>
+					<input
+						type="checkbox"
+						id={todo.id}
+						checked={todo.done}
+						oninput={() => {
+							toggleTodo(todo.id);
+						}}
+					/>
+					{todo.title}</label
+				>
+				<button onclick={() => deleteTodo(todo.id)}> x</button>
+			</div>
+		{/each}
 	</div>
 </div>
 

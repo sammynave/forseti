@@ -1,4 +1,5 @@
 import { ZSet } from './z-set.js';
+import { Stream } from './stream.js';
 
 type TodoCreatedEvent = {
 	type: 'TodoCreated';
@@ -38,6 +39,8 @@ export function todoDeletedEvent({ id }: { id: string }): TodoDeletedEvent {
 }
 
 export class EventStore {
+	// Add change stream tracking
+	private changeStream = new Stream();
 	// Current state (always up-to-date)
 	private currentSnapshot = new ZSet();
 
@@ -56,6 +59,7 @@ export class EventStore {
 	private eventCount = 0;
 
 	private subscribers: ((snapshot: ZSet) => void)[] = [];
+	private changeSubscribers: ((snapshot: ZSet) => void)[] = [];
 
 	subscribe(callback: (snapshot: ZSet) => void) {
 		this.subscribers.push(callback);
@@ -69,6 +73,19 @@ export class EventStore {
 	private notify() {
 		const snapshot = this.getCurrentSnapshot();
 		this.subscribers.forEach((callback) => callback(snapshot));
+	}
+
+	subscribeToChanges(callback: (change: ZSet) => void) {
+		this.changeSubscribers.push(callback);
+		// Return unsubscribe function
+		return () => {
+			const index = this.subscribers.indexOf(callback);
+			if (index > -1) this.subscribers.splice(index, 1);
+		};
+	}
+	private notifyChanges(change: ZSet) {
+		console.log('es sub', change);
+		this.changeSubscribers.forEach((callback) => callback(change));
 	}
 
 	append(event: Event) {
@@ -90,6 +107,11 @@ export class EventStore {
 
 		// Apply change to current state (DBSP core)
 		const change = eventToZSetChange(event, this.currentSnapshot);
+
+		// Add change to stream
+		this.changeStream.append(change);
+		this.notifyChanges(change);
+
 		this.currentSnapshot = this.currentSnapshot.plus(change);
 
 		this.notify();
@@ -102,6 +124,11 @@ export class EventStore {
 		// 		`📊 Current: ${this.currentSnapshot.materialize.length} todos, History: ${this.recentSnapshots.length} snapshots`
 		// 	);
 		// }
+	}
+
+	// Expose change stream ← NEW
+	getChangeStream(): Stream {
+		return this.changeStream;
 	}
 
 	getCurrentSnapshot(): ZSet {
