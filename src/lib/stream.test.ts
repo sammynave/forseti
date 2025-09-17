@@ -304,3 +304,137 @@ describe('Theorem 2.20 - Integration/Differentiation Inversion', () => {
 		expect(zsetsEqual(reintegrated.get(0), stream.get(0))).toBe(true);
 	});
 });
+
+describe('Stream Union Operations', () => {
+	it('liftUnion combines two streams following DBSP Table 1: UNION = distinct(I1 + I2)', () => {
+		// Setup: Create two streams with test data
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		// Test objects - simple and predictable
+		const itemA = { id: 'A', name: 'Item A' };
+		const itemB = { id: 'B', name: 'Item B' };
+		const itemC = { id: 'C', name: 'Item C' };
+		const itemD = { id: 'D', name: 'Item D' };
+
+		// t=0: stream1 has {A, B}, stream2 has {B, C}
+		const zset1_t0 = new ZSet();
+		zset1_t0.add(itemA, 1);
+		zset1_t0.add(itemB, 1);
+		stream1.append(zset1_t0);
+
+		const zset2_t0 = new ZSet();
+		zset2_t0.add(itemB, 1); // B appears in both - should be deduplicated
+		zset2_t0.add(itemC, 1);
+		stream2.append(zset2_t0);
+
+		// t=1: stream1 adds {D}, stream2 adds {A}
+		const zset1_t1 = new ZSet();
+		zset1_t1.add(itemD, 1);
+		stream1.append(zset1_t1);
+
+		const zset2_t1 = new ZSet();
+		zset2_t1.add(itemA, 1); // A appears in both - should be deduplicated
+		stream2.append(zset2_t1);
+
+		// Execute: Perform union
+		const unionResult = stream1.liftUnion(stream2);
+
+		// Verify: Check results at each time point
+
+		// t=0: Union of {A,B} and {B,C} should be {A,B,C}
+		const result_t0 = unionResult.get(0);
+		expect(result_t0.materialize).toHaveLength(3);
+		expect(result_t0.materialize).toContainEqual(itemA);
+		expect(result_t0.materialize).toContainEqual(itemB); // B only once due to distinct
+		expect(result_t0.materialize).toContainEqual(itemC);
+
+		// t=1: Union of {D} and {A} should be {A,D}
+		const result_t1 = unionResult.get(1);
+		expect(result_t1.materialize).toHaveLength(2);
+		expect(result_t1.materialize).toContainEqual(itemA); // A only once due to distinct
+		expect(result_t1.materialize).toContainEqual(itemD);
+
+		// Verify stream properties
+		expect(unionResult.length).toBe(2);
+	});
+	it('handles empty streams correctly', () => {
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		const item = { id: 'X', name: 'Item X' };
+
+		// stream1 is empty, stream2 has data
+		const zset = new ZSet();
+		zset.add(item, 1);
+		stream2.append(zset);
+
+		const unionResult = stream1.liftUnion(stream2);
+
+		// Should equal stream2 (union with empty = identity)
+		expect(unionResult.get(0).materialize).toEqual([item]);
+	});
+
+	it('handles streams of different lengths', () => {
+		const stream1 = new Stream(); // length 1
+		const stream2 = new Stream(); // length 3
+
+		const itemA = { id: 'A', name: 'A' };
+		const itemB = { id: 'B', name: 'B' };
+		const itemC = { id: 'C', name: 'C' };
+
+		// stream1: just one element
+		const zset1 = new ZSet();
+		zset1.add(itemA, 1);
+		stream1.append(zset1);
+
+		// stream2: three elements
+		const zset2_t0 = new ZSet();
+		zset2_t0.add(itemB, 1);
+		stream2.append(zset2_t0);
+
+		const zset2_t1 = new ZSet();
+		zset2_t1.add(itemC, 1);
+		stream2.append(zset2_t1);
+
+		const zset2_t2 = new ZSet();
+		zset2_t2.add(itemA, 1); // Same as stream1[0]
+		stream2.append(zset2_t2);
+
+		const unionResult = stream1.liftUnion(stream2);
+
+		// t=0: {A} ∪ {B} = {A,B}
+		expect(unionResult.get(0).materialize).toHaveLength(2);
+
+		// t=1: {} ∪ {C} = {C} (stream1[1] is empty)
+		expect(unionResult.get(1).materialize).toEqual([itemC]);
+
+		// t=2: {} ∪ {A} = {A}
+		expect(unionResult.get(2).materialize).toEqual([itemA]);
+
+		expect(unionResult.length).toBe(3); // Max of both stream lengths
+	});
+
+	it('verifies DBSP mathematical property: union is distinct(I1 + I2)', () => {
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		const item = { id: 'X', name: 'Test' };
+
+		// Both streams have same item with different weights
+		const zset1 = new ZSet();
+		zset1.add(item, 2); // weight 2
+		stream1.append(zset1);
+
+		const zset2 = new ZSet();
+		zset2.add(item, 3); // weight 3
+		stream2.append(zset2);
+
+		const unionResult = stream1.liftUnion(stream2);
+
+		// Manual calculation: distinct({item:2} + {item:3}) = distinct({item:5}) = {item:1}
+		// Union should normalize to weight 1 regardless of input weights
+		expect(unionResult.get(0).materialize).toEqual([item]);
+		expect(unionResult.get(0).debug().get(JSON.stringify(item))).toBe(1);
+	});
+});

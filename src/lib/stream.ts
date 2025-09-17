@@ -309,4 +309,23 @@ export class Stream {
 	liftDistinct(): Stream {
 		return this.lift((zset) => zset.distinct());
 	}
+
+	liftUnion(other: Stream): Stream {
+		const result = new Stream();
+
+		// Handle different stream lengths: max of both
+		const maxLength = Math.max(this.length, other.length);
+
+		for (let t = 0; t < maxLength; t++) {
+			// Get ZSets at time t, using empty ZSet if beyond stream length
+			const thisZSet = t < this.length ? this.get(t) : new ZSet();
+			const otherZSet = t < other.length ? other.get(t) : new ZSet();
+
+			// Apply DBSP Table 1 formula: UNION = distinct(I1 + I2)
+			const unionZSet = thisZSet.union(otherZSet);
+			result.append(unionZSet);
+		}
+
+		return result;
+	}
 }

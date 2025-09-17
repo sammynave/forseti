@@ -153,7 +153,9 @@ export class Query<T> {
 					circuit.addOperator((stream) => stream.liftDistinct());
 					break;
 				case 'union':
-					// TODO: Implement union support in Circuit
+					// Execute otherQuery to get its stream
+					const otherQueryStream = op.otherQuery!.execute();
+					circuit.addBinaryOperator((left, right) => left.liftUnion(right), otherQueryStream);
 					break;
 			}
 		}

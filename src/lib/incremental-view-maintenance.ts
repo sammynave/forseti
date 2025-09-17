@@ -48,8 +48,6 @@ const userAnalytics = Query
  */
 
 export class IncrementalViewMaintenance {
-	private currentQueryOperations: QueryOperation[] = [];
-
 	/**
 	 * Main API: Generate optimized incremental plan from fluent query
 	 *
@@ -57,16 +55,15 @@ export class IncrementalViewMaintenance {
 	 * @returns Optimized circuit that processes only changes
 	 */
 	generateIncrementalPlan<T>(query: Query<T>): Circuit {
-		// Step 1: Optimize query operations directly
+		// Algorithm 4.6 Step 1: Build DBSP circuit from query operations
+		// Step 2: Apply distinct elimination rules
 		const optimizedOperations = this.optimizeQueryOperations(query.getOperations());
 
-		// Store for chain rule optimization
-		this.currentQueryOperations = optimizedOperations;
+		// Algorithm 4.6 Steps 1-3: Build and lift circuit
+		const circuit = Circuit.fromQueryOperations(optimizedOperations);
 
-		// Step 2: Apply chain rule optimization (this does the incrementalization)
-		const optimizedCircuit = this.applyChainRule(new Circuit());
-
-		return optimizedCircuit;
+		// Algorithm 4.6 Steps 4-5: Incrementalize with Q^Δ = D ∘ Q ∘ I
+		return circuit.makeIncremental();
 	}
 
 	/**
@@ -81,119 +78,6 @@ export class IncrementalViewMaintenance {
 		optimized = this.consolidateDistinctOps(optimized);
 
 		return optimized;
-	}
-
-	/**
-	 * Step 5: Apply chain rule and operator-specific optimizations
-	 *
-	 * Paper Reference: Proposition 3.2 (chain rule properties)
-	 * - Linear operators: Q^Δ = Q (Theorem 3.3)
-	 * - Bilinear operators: Use Theorem 3.4 formula
-	 * - Composition: (Q1 ∘ Q2)^Δ = Q1^Δ ∘ Q2^Δ
-	 */
-	private applyChainRule(circuit: Circuit): Circuit {
-		// Instead of generic incrementalization, we'll build an optimized
-		// incremental circuit based on operator types
-		const optimizedCircuit = new Circuit();
-
-		// We need the original query operations to determine optimization strategy
-		const operations = this.currentQueryOperations; // Store this during optimization
-
-		optimizedCircuit.addOperator((deltaStream: Stream) => {
-			return this.executeOptimizedIncremental(deltaStream, operations);
-		});
-
-		return optimizedCircuit;
-	}
-
-	/**
-	 * Execute incremental query with operator-specific optimizations
-	 */
-	private executeOptimizedIncremental(deltaStream: Stream, operations: QueryOperation[]): Stream {
-		let currentStream = deltaStream;
-
-		for (const op of operations) {
-			if (op.type === 'source') {
-				continue; // Skip source
-			}
-
-			// Apply operator-specific incremental version
-			currentStream = this.applyIncrementalOperator(currentStream, op);
-		}
-
-		return currentStream;
-	}
-
-	/**
-	 * Apply incremental version of a single operator
-	 */
-	private applyIncrementalOperator(deltaStream: Stream, operation: QueryOperation): Stream {
-		switch (operation.type) {
-			case 'filter':
-				// Theorem 3.3: Linear operator - Q^Δ = Q
-				return deltaStream.liftFilter(operation.predicate!);
-
-			case 'project':
-				// Theorem 3.3: Linear operator - Q^Δ = Q
-				return deltaStream.liftProject(operation.selector!);
-
-			case 'join':
-				// Theorem 3.4: Bilinear operator - use optimized formula
-				return this.applyIncrementalJoin(deltaStream, operation);
-
-			case 'distinct':
-				// Proposition 4.7: Optimized distinct implementation
-				return this.applyIncrementalDistinct(deltaStream);
-
-			case 'union':
-				// Linear operator: Q^Δ = Q (just addition)
-				return this.applyIncrementalUnion(deltaStream, operation);
-
-			default:
-				throw new Error(`Unknown operation type: ${operation.type}`);
-		}
-	}
-
-	/**
-	 * Apply incremental join using Theorem 3.4 optimized formula
-	 * (a × b)^Δ = I(a) × b + a × z⁻¹(I(b))
-	 */
-	private applyIncrementalJoin(deltaStream: Stream, operation: QueryOperation): Stream {
-		const otherStream = operation.otherStream!;
-
-		// Use existing optimized join implementation from Stream class
-		return deltaStream.liftJoinIncremental(otherStream, operation.thisKey!, operation.otherKey!);
-	}
-
-	/**
-	 * Apply incremental distinct using Proposition 4.7
-	 * This is more efficient than naive D ∘ distinct ∘ I
-	 */
-	private applyIncrementalDistinct(deltaStream: Stream): Stream {
-		// The Stream class already has an optimized distinct implementation
-		// For incremental distinct, we need to track the current state
-
-		// For now, use the existing lift distinct - in full implementation,
-		// we'd use the optimized incremental distinct from Proposition 4.7
-		return deltaStream.liftDistinct();
-	}
-
-	/**
-	 * Apply incremental union (linear operator)
-	 *
-	 * TODO: Full union implementation requires:
-	 * - Multi-stream input handling
-	 * - Stream source resolution
-	 * - Time synchronization between different source streams
-	 *
-	 * For now, throw clear error to indicate this feature is planned but not implemented.
-	 */
-	private applyIncrementalUnion(deltaStream: Stream, operation: QueryOperation): Stream {
-		throw new Error(
-			'Union operation not yet implemented in incremental mode. ' +
-				'Union requires multi-stream input handling which is planned for a future release. ' +
-				'Current supported operations: filter, project, join, distinct.'
-		);
 	}
 
 	/**
@@ -291,6 +175,6 @@ export class IncrementalViewMaintenance {
 	 * Check if operation is linear (can have distinct pushed through it)
 	 */
 	private isLinearOperation(op: QueryOperation): boolean {
-		return ['filter', 'project'].includes(op.type);
+		return ['filter', 'project', 'union'].includes(op.type);
 	}
 }

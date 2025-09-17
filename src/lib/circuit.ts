@@ -1,3 +1,4 @@
+import type { QueryOperation } from './query-builder.js';
 import { Stream } from './stream.js';
 import { delta0, integrate, streamSum } from './stream/utils.js';
 import { ZSet } from './z-set.js';
@@ -113,7 +114,31 @@ export class Circuit {
 	}
 
 	private addOperationFromQuery(op: QueryOperation): void {
-		// Convert query builder operations to circuit operators
+		switch (op.type) {
+			case 'source':
+				// Source is handled by the circuit input
+				break;
+			case 'filter':
+				this.addOperator((stream) => stream.liftFilter(op.predicate!));
+				break;
+			case 'project':
+				this.addOperator((stream) => stream.liftProject(op.selector!));
+				break;
+			case 'join':
+				this.addBinaryOperator(
+					(left, right) => left.liftJoin(right, op.thisKey!, op.otherKey!),
+					op.otherStream!
+				);
+				break;
+			case 'distinct':
+				this.addOperator((stream) => stream.liftDistinct());
+				break;
+			case 'union':
+				// Execute otherQuery to get its stream
+				const otherQueryStream = op.otherQuery!.execute();
+				this.addBinaryOperator((left, right) => left.liftUnion(right), otherQueryStream);
+				break;
+		}
 	}
 
 	// Add an operator to the circuit

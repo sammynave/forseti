@@ -433,3 +433,95 @@ describe('Algorithm 4.6 - Chain Rule Optimizations', () => {
 		]);
 	});
 });
+
+describe('Query Union Integration', () => {
+	it('executes union query in regular (non-incremental) mode', () => {
+		// Create two streams with test data
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		// Add different items to each stream
+		const zset1 = new ZSet();
+		zset1.add({ id: 'A', type: 'premium' }, 1);
+		stream1.append(zset1);
+
+		const zset2 = new ZSet();
+		zset2.add({ id: 'B', type: 'basic' }, 1);
+		stream2.append(zset2);
+
+		// Execute union query
+		const result = Query.from(stream1).union(Query.from(stream2)).execute();
+
+		// Should contain both items
+		expect(result.get(0).materialize).toHaveLength(2);
+		expect(result.get(0).materialize).toContainEqual({ id: 'A', type: 'premium' });
+		expect(result.get(0).materialize).toContainEqual({ id: 'B', type: 'basic' });
+	});
+	it('executes union query in incremental mode', () => {
+		// This tests the entire refactored architecture
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		// Setup initial data
+		const zset1 = new ZSet();
+		zset1.add({ id: 'A', active: true }, 1);
+		stream1.append(zset1);
+
+		const zset2 = new ZSet();
+		zset2.add({ id: 'B', active: true }, 1);
+		stream2.append(zset2);
+
+		// Execute incremental union query
+		const result = Query.from(stream1)
+			.where((item) => item.active)
+			.union(Query.from(stream2).where((item) => item.active))
+			.autoIncremental(); // This tests the new Circuit-based approach!
+
+		// Verify results
+		expect(result.get(0).materialize).toHaveLength(2);
+		expect(result.get(0).materialize).toStrictEqual([
+			{ id: 'A', active: true },
+			{ id: 'B', active: true }
+		]);
+	});
+	it('optimizes union with distinct elimination rules', () => {
+		// Test that Proposition 4.4/4.5 optimizations work with union
+		const stream1 = new Stream();
+		const stream2 = new Stream();
+
+		// Add test data to both streams
+		const zset1 = new ZSet();
+		zset1.add({ id: 'A', type: 'premium' }, 1);
+		zset1.add({ id: 'B', type: 'premium' }, 2); // Weight 2 to test distinct
+		stream1.append(zset1);
+
+		const zset2 = new ZSet();
+		zset2.add({ id: 'C', type: 'basic' }, 1);
+		zset2.add({ id: 'D', type: 'basic' }, 3); // Weight 3 to test distinct
+		stream2.append(zset2);
+
+		const result = Query.from(stream1)
+			.where((item) => item.type === 'premium')
+			.distinct()
+			.union(Query.from(stream2).where((item) => item.type === 'basic'))
+			.distinct()
+			.autoIncremental();
+
+		// Should work without errors AND produce correct results
+		const integrated = integrate(result);
+		const materialized = integrated.get(0).materialize;
+
+		// Should contain all 4 items, each with weight 1 due to distinct
+		expect(materialized).toHaveLength(4);
+		expect(materialized).toContainEqual({ id: 'A', type: 'premium' });
+		expect(materialized).toContainEqual({ id: 'B', type: 'premium' });
+		expect(materialized).toContainEqual({ id: 'C', type: 'basic' });
+		expect(materialized).toContainEqual({ id: 'D', type: 'basic' });
+
+		// Verify distinct worked (all weights should be 1, not original weights)
+		const debugResult = integrated.get(0).debug();
+		for (const [key, weight] of debugResult) {
+			expect(weight).toBe(1); // distinct should normalize all weights to 1
+		}
+	});
+});
