@@ -5,7 +5,6 @@
 		todoCreatedEvent,
 		todoToggledEvent
 	} from '$lib/event-store.js';
-	import { ZSet } from '$lib/z-set.js';
 	import { onDestroy, onMount } from 'svelte';
 	import { Query } from '$lib/query-builder.js';
 
@@ -17,7 +16,8 @@
 	});
 	const eventStore = new EventStore();
 
-	let currentSnapshot = $state(new ZSet());
+	const initialState = eventStore.getCurrentSnapshot();
+	let currentSnapshot = $state(initialState);
 	let completedTodos = $state<Todo[]>([]);
 
 	// Subscribe to EventStore changes
@@ -28,7 +28,7 @@
 	// Create streaming processor
 	const completedTodosProcessor = Query.from<Todo>()
 		.where((todo: Todo) => todo.done)
-		.createStreamingProcessor();
+		.createStreamingProcessor(initialState);
 
 	const unsubscribeChanges = eventStore.subscribeToChanges((change) => {
 		completedTodosProcessor.processChange(change);

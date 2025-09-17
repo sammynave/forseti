@@ -189,14 +189,20 @@ export class Query<T> {
 export class StreamingProcessor<T> {
 	private currentState = new ZSet();
 	private subscribers: ((state: ZSet, change: ZSet) => void)[] = [];
+	private initialSnapshot?: ZSet;
 
 	constructor(
 		private operations: QueryOperation[],
 		initialSnapshot?: ZSet
 	) {
+		this.initialSnapshot = initialSnapshot;
 		if (initialSnapshot) {
 			this.currentState = this.applyOperationsToSnapshot(initialSnapshot);
 		}
+	}
+
+	private hasDistinctOperation(): boolean {
+		return this.operations.some((op) => op.type === 'distinct');
 	}
 
 	private applyOperationsToSnapshot(snapshot: ZSet): ZSet {
@@ -208,8 +214,25 @@ export class StreamingProcessor<T> {
 				result = result.filter(op.predicate!);
 			} else if (op.type === 'project') {
 				result = result.project(op.selector!);
+			} else if (op.type === 'distinct') {
+				result = result.distinct(); // applyOperationsToSnapshot
+			} else if (op.type === 'join') {
+				// For initial snapshot, join with other stream's latest state
+				const otherZSet = op.otherStream!.get(op.otherStream!.length - 1) || new ZSet();
+				result = result.join(otherZSet, op.thisKey!, op.otherKey!);
+			} else if (op.type === 'union') {
+				// For initial snapshot, union with other query's result from ITS OWN source stream
+				const otherSourceOp = op.otherQuery!.getOperations().find((o) => o.type === 'source');
+				if (otherSourceOp && otherSourceOp.stream && otherSourceOp.stream.length > 0) {
+					// Use the other query's source stream latest snapshot, not the main snapshot
+					const otherSnapshot = otherSourceOp.stream.get(otherSourceOp.stream.length - 1);
+					const otherResult = op
+						.otherQuery!.createStreamingProcessor(otherSnapshot)
+						.getCurrentState();
+					result = result.union(otherResult);
+				}
+				// If the other stream is empty, just continue with current result
 			}
-			// ... other operations
 		}
 
 		return result;
@@ -229,19 +252,33 @@ export class StreamingProcessor<T> {
 				processedChange = processedChange.filter(op.predicate!);
 			} else if (op.type === 'project') {
 				processedChange = processedChange.project(op.selector!);
+			} else if (op.type === 'distinct') {
+				processedChange = processedChange.distinct(); // processChange
+			} else if (op.type === 'join') {
+				// Join with the other stream's current state - need to get ZSet, not Stream
+				const otherZSet = op.otherStream!.get(op.otherStream!.length - 1) || new ZSet();
+				processedChange = processedChange.join(otherZSet, op.thisKey!, op.otherKey!);
+			} else if (op.type === 'union') {
+				// Get the other query's current state from ITS OWN source stream
+				const otherSourceOp = op.otherQuery!.getOperations().find((o) => o.type === 'source');
+				if (otherSourceOp && otherSourceOp.stream && otherSourceOp.stream.length > 0) {
+					const otherSnapshot = otherSourceOp.stream.get(otherSourceOp.stream.length - 1);
+					const otherProcessor = op.otherQuery!.createStreamingProcessor(otherSnapshot);
+					const otherState = otherProcessor.getCurrentState();
+					processedChange = processedChange.union(otherState);
+				}
+				// If the other stream is empty, union with empty set (no change)
 			}
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
-			// TODO Add other operations as needed
+
+			// Add other operations as needed
 		}
 
 		// Update internal state
 		this.currentState = this.currentState.plus(processedChange);
+
+		if (this.hasDistinctOperation()) {
+			this.currentState = this.currentState.distinct();
+		}
 
 		// Notify subscribers
 		this.notify(this.currentState, processedChange);

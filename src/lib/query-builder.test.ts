@@ -525,3 +525,219 @@ describe('Query Union Integration', () => {
 		}
 	});
 });
+describe('StreamingProcessor - Incremental Operations', () => {
+	it('initializes with correct state from snapshot', () => {
+		// Create initial snapshot with test data
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ id: 'A', active: true }, 1);
+		initialSnapshot.add({ id: 'B', active: false }, 1);
+		initialSnapshot.add({ id: 'C', active: true }, 1);
+
+		// Create processor with filter
+		const processor = Query.from<any>(new Stream())
+			.where((item) => item.active)
+			.createStreamingProcessor(initialSnapshot);
+
+		// Should start with filtered initial state
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(2);
+		expect(currentState.materialize).toStrictEqual([
+			{ id: 'A', active: true },
+			{ id: 'C', active: true }
+		]);
+	});
+
+	it('processes filter changes incrementally', () => {
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ id: 'A', active: true }, 1);
+
+		const processor = Query.from<any>(new Stream())
+			.where((item) => item.active)
+			.createStreamingProcessor(initialSnapshot);
+
+		// Process a change: add new active item
+		const change = new ZSet();
+		change.add({ id: 'B', active: true }, 1);
+		change.add({ id: 'C', active: false }, 1); // Should be filtered out
+
+		processor.processChange(change);
+
+		// Should have A (initial) + B (new active)
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(2);
+		expect(currentState.materialize).toStrictEqual([
+			{ id: 'A', active: true },
+			{ id: 'B', active: true }
+		]);
+	});
+
+	it('processes project changes incrementally', () => {
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ id: 'A', name: 'Alice', active: true }, 1);
+
+		const processor = Query.from<any>(new Stream())
+			.select((item) => ({ name: item.name }))
+			.createStreamingProcessor(initialSnapshot);
+
+		// Initial state should be projected
+		expect(processor.getCurrentState().materialize).toEqual([{ name: 'Alice' }]);
+
+		// Process change
+		const change = new ZSet();
+		change.add({ id: 'B', name: 'Bob', active: false }, 1);
+
+		processor.processChange(change);
+
+		// Should have both projected names
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(2);
+		expect(currentState.materialize).toStrictEqual([{ name: 'Alice' }, { name: 'Bob' }]);
+	});
+
+	it('processes distinct changes incrementally', () => {
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ type: 'A' }, 2); // Weight 2 - should become 1
+
+		const processor = Query.from<any>(new Stream())
+			.distinct()
+			.createStreamingProcessor(initialSnapshot);
+
+		// Initial state should be distinct (weight 1)
+		expect(processor.getCurrentState().debug().get('{"type":"A"}')).toBe(1);
+
+		// Process change: add same item with weight 3
+		const change = new ZSet();
+		change.add({ type: 'A' }, 3);
+
+		processor.processChange(change);
+
+		// Should still have weight 1 (distinct)
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toStrictEqual([{ type: 'A' }]);
+		expect(currentState.debug().get('{"type":"A"}')).toBe(1);
+	});
+
+	it('processes join changes incrementally', () => {
+		// Create initial data
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ id: 'A', userId: 1 }, 1);
+
+		// Create other stream with user data
+		const userStream = new Stream();
+		const userZSet = new ZSet();
+		userZSet.add({ userId: 1, name: 'Alice' }, 1);
+		userStream.append(userZSet);
+
+		const processor = Query.from<any>(new Stream())
+			.join(
+				userStream,
+				(item) => item.userId,
+				(user) => user.userId
+			)
+			.createStreamingProcessor(initialSnapshot);
+
+		// Should have initial join result
+		const initialState = processor.getCurrentState().materialize;
+		expect(initialState).toHaveLength(1);
+		expect(initialState[0]).toEqual([
+			{ id: 'A', userId: 1 },
+			{ userId: 1, name: 'Alice' }
+		]);
+
+		// Process change: add item that matches existing user
+		const change = new ZSet();
+		change.add({ id: 'B', userId: 1 }, 1);
+
+		processor.processChange(change);
+
+		// Should have both join results
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(2);
+		expect(currentState.materialize).toStrictEqual([
+			[
+				{
+					id: 'A',
+					userId: 1
+				},
+				{
+					name: 'Alice',
+					userId: 1
+				}
+			],
+			[
+				{
+					id: 'B',
+					userId: 1
+				},
+				{
+					name: 'Alice',
+					userId: 1
+				}
+			]
+		]);
+	});
+
+	it('processes union changes incrementally', () => {
+		// Create two initial snapshots
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ type: 'A', id: 1 }, 1);
+
+		// Create other query source
+		const otherStream = new Stream();
+		const otherZSet = new ZSet();
+		otherZSet.add({ type: 'B', id: 2 }, 1);
+		otherStream.append(otherZSet);
+
+		const processor = Query.from<any>(new Stream())
+			.union(Query.from(otherStream))
+			.createStreamingProcessor(initialSnapshot);
+
+		// Should have union of both initial states
+		const initialState = processor.getCurrentState();
+		expect(initialState.materialize).toHaveLength(2);
+		expect(initialState.materialize).toContainEqual({ type: 'A', id: 1 });
+		expect(initialState.materialize).toContainEqual({ type: 'B', id: 2 });
+
+		// Process change
+		const change = new ZSet();
+		change.add({ type: 'C', id: 3 }, 1);
+
+		processor.processChange(change);
+
+		// Should have all three items
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(3);
+	});
+
+	it('handles complex query chains', () => {
+		const initialSnapshot = new ZSet();
+		initialSnapshot.add({ id: 'A', type: 'premium', active: true }, 1);
+		initialSnapshot.add({ id: 'B', type: 'basic', active: false }, 1);
+		initialSnapshot.add({ id: 'C', type: 'premium', active: true }, 1);
+
+		const processor = Query.from<any>(new Stream())
+			.where((item) => item.active)
+			.where((item) => item.type === 'premium')
+			.select((item) => ({ id: item.id, tier: 'PREMIUM' }))
+			.distinct()
+			.createStreamingProcessor(initialSnapshot);
+
+		// Should start with filtered and projected data
+		const initialState = processor.getCurrentState();
+		expect(initialState.materialize).toHaveLength(2);
+		expect(initialState.materialize).toContainEqual({ id: 'A', tier: 'PREMIUM' });
+		expect(initialState.materialize).toContainEqual({ id: 'C', tier: 'PREMIUM' });
+
+		// Process change
+		const change = new ZSet();
+		change.add({ id: 'D', type: 'premium', active: true }, 1);
+		change.add({ id: 'E', type: 'basic', active: true }, 1); // Should be filtered out
+
+		processor.processChange(change);
+
+		// Should have all premium active users
+		const currentState = processor.getCurrentState();
+		expect(currentState.materialize).toHaveLength(3);
+		expect(currentState.materialize).toContainEqual({ id: 'D', tier: 'PREMIUM' });
+	});
+});
