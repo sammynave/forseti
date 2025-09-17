@@ -3,6 +3,7 @@ import { todoCreatedEvent, todoDeletedEvent, todoToggledEvent, type Event } from
 import { Stream } from './stream.js';
 import { integrate } from './stream/utils.js';
 import { ZSet } from './z-set.js';
+import { streamsEqual, zsetsEqual } from './mathematical-properties.test.js';
 
 describe('Stream', () => {
 	it('can set and get', () => {
@@ -58,7 +59,7 @@ describe('Stream', () => {
 });
 
 describe('Stream Operators - DBSP Compliance', () => {
-	it('differentiate computes stream differences', () => {
+	it('differentiate computes stream differences correctly (Definition 2.15)', () => {
 		const stream = new Stream();
 
 		// t=0: Add item
@@ -74,11 +75,44 @@ describe('Stream Operators - DBSP Compliance', () => {
 
 		const diff = stream.differentiate();
 
-		// D[0] = s[0]
+		// DBSP Definition 2.15: D(s)[0] = s[0] exactly
 		expect(diff.get(0).materialize).toEqual(['item1']);
-		// D[1] = s[1] - s[0] = just item2
-		// since item1 already existed, it doesn't matter that we add it again
+
+		// D(s)[1] = s[1] - s[0]
+		// s[1] = {item1: 1, item2: 1}, s[0] = {item1: 1}
+		// s[1] - s[0] = {item2: 1} (item1 cancels out)
 		expect(diff.get(1).materialize).toEqual(['item2']);
+	});
+
+	// NEW TEST: Verify the exact paper definition
+	it('differentiate matches DBSP Definition 2.15 exactly', () => {
+		const stream = new Stream();
+
+		// Create meaningful test data with non-zero weights
+		const data = [
+			{ item: 'a', weight: 1 }, // t=0: {a: 1}
+			{ item: 'b', weight: 2 }, // t=1: {b: 2}
+			{ item: 'c', weight: 3 } // t=2: {c: 3}
+		];
+
+		data.forEach(({ item, weight }) => {
+			const zset = new ZSet();
+			zset.add(item, weight);
+			stream.append(zset);
+		});
+
+		const diff = stream.differentiate();
+
+		// D(s)[0] = s[0] = {a: 1}
+		expect(diff.get(0).debug().get('"a"')).toBe(1);
+
+		// D(s)[1] = s[1] - s[0] = {b: 2} - {a: 1} = {b: 2, a: -1}
+		expect(diff.get(1).debug().get('"b"')).toBe(2);
+		expect(diff.get(1).debug().get('"a"')).toBe(-1);
+
+		// D(s)[2] = s[2] - s[1] = {c: 3} - {b: 2} = {c: 3, b: -2}
+		expect(diff.get(2).debug().get('"c"')).toBe(3);
+		expect(diff.get(2).debug().get('"b"')).toBe(-2);
 	});
 
 	it('delay shifts stream by one time unit', () => {
@@ -197,5 +231,76 @@ describe('Lifting Operator (↑f)', () => {
 
 		const negated = stream.lift((z) => z.negate());
 		expect(negated.get(0).debug().get('"item"')).toBe(-1);
+	});
+});
+
+describe('Theorem 2.20 - Integration/Differentiation Inversion', () => {
+	it('verifies I(D(s)) = s exactly (left inverse)', () => {
+		const originalStream = new Stream();
+
+		// Create test stream with varied data
+		const data = [
+			{ items: ['a'], weights: [1] },
+			{ items: ['a', 'b'], weights: [1, 1] },
+			{ items: ['b'], weights: [2] }, // Different weight
+			{ items: ['c'], weights: [1] }
+		];
+
+		data.forEach(({ items, weights }) => {
+			const zset = new ZSet();
+			items.forEach((item, i) => zset.add(item, weights[i]));
+			originalStream.append(zset);
+		});
+
+		// Apply D then I: should get back original
+		const differentiated = originalStream.differentiate();
+		const reintegrated = integrate(differentiated);
+
+		// Verify I(D(s)) = s exactly
+		expect(streamsEqual(reintegrated, originalStream)).toBe(true);
+	});
+
+	it('verifies D(I(s)) = s exactly (right inverse)', () => {
+		const changeStream = new Stream();
+
+		// Create change stream (what integration expects)
+		const changes = [
+			{ items: ['a'], weights: [1] }, // Add 'a'
+			{ items: ['b'], weights: [1] }, // Add 'b'
+			{ items: ['a'], weights: [-1] }, // Remove 'a'
+			{ items: ['c'], weights: [1] } // Add 'c'
+		];
+
+		changes.forEach(({ items, weights }) => {
+			const zset = new ZSet();
+			items.forEach((item, i) => zset.add(item, weights[i]));
+			changeStream.append(zset);
+		});
+
+		// Apply I then D: should get back original changes
+		const integrated = integrate(changeStream);
+		const redifferentiated = integrated.differentiate();
+
+		// Verify D(I(s)) = s exactly
+		expect(streamsEqual(redifferentiated, changeStream)).toBe(true);
+	});
+
+	it('demonstrates why the fix was critical', () => {
+		// This test would FAIL with the old differentiation implementation
+		const stream = new Stream();
+		const zset = new ZSet();
+		zset.add('test_item', 1);
+		stream.append(zset);
+
+		const diff = stream.differentiate();
+		const reintegrated = integrate(diff);
+
+		// With old implementation: D(s)[0] = s[0] - 0 ≠ s[0]
+		// This would cause I(D(s))[0] ≠ s[0], breaking inversion
+
+		// With correct implementation: D(s)[0] = s[0] exactly
+		// So I(D(s))[0] = s[0], preserving inversion
+
+		expect(zsetsEqual(reintegrated.get(0), stream.get(0))).toBe(true);
 	});
 });

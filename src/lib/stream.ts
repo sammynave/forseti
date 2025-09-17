@@ -87,16 +87,33 @@ export class Stream {
 		return t >= 0 && Number.isInteger(t) && t < this.values.length;
 	}
 
+	/**
+	 * Stream Differentiation Operator (D)
+	 *
+	 * DBSP Definition 2.15: D(s)[t] = s[t] - s[t-1] for t > 0, D(s)[0] = s[0]
+	 * Paper Reference: Section 2.3, Definition 2.15
+	 *
+	 * This is the PRECISE implementation from the paper. Note that D(s)[0] = s[0]
+	 * directly, NOT s[0] - 0. This is critical for Theorem 2.20 (inversion property)
+	 * and all incremental computation correctness.
+	 *
+	 * Properties:
+	 * - Causal: output at time t depends only on inputs up to time t
+	 * - Linear: D(s + t) = D(s) + D(t)
+	 * - Time-Invariant: D(z⁻¹(s)) = z⁻¹(D(s))
+	 * - Inverse of Integration: I(D(s)) = D(I(s)) = s
+	 *
+	 * @returns Stream of differences representing rate of change
+	 */
 	differentiate(): Stream {
 		const result = new Stream();
 
 		for (let t = 0; t < this.length; t++) {
 			if (t === 0) {
-				// D(s)[0] = s[0] - 0_A (where 0_A is zero element)
-				const zero = new ZSet(); // Zero element of the group
-				result.append(this.get(0).plus(zero.negate())); // s[0] - 0_A
+				// DBSP Definition 2.15: D(s)[0] = s[0] (NOT s[0] - 0)
+				result.append(this.get(0));
 			} else {
-				// D(s)[t] = s[t] - s[t-1]
+				// D(s)[t] = s[t] - s[t-1] for t > 0
 				const current = this.get(t);
 				const previous = this.get(t - 1);
 				result.append(current.plus(previous.negate()));

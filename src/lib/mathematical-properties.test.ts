@@ -60,7 +60,6 @@ describe('DBSP Mathematical Properties', () => {
 			const z = new ZSet();
 			z.add('a', 1);
 			z.add('a', -1); // Should result in weight 0 and removal
-
 			// Should not store zero weights
 			expect(z.debug().has('"a"')).toBe(false);
 			expect(z.isZero()).toBe(true);
@@ -410,7 +409,7 @@ describe('DBSP Mathematical Properties', () => {
 });
 
 // Helper functions
-function zsetsEqual(z1: ZSet, z2: ZSet): boolean {
+export function zsetsEqual(z1: ZSet, z2: ZSet): boolean {
 	// Compare using debug() which shows the actual internal state
 	const debug1 = z1.debug();
 	const debug2 = z2.debug();
@@ -426,7 +425,7 @@ function zsetsEqual(z1: ZSet, z2: ZSet): boolean {
 	return true;
 }
 
-function streamsEqual(s1: Stream, s2: Stream): boolean {
+export function streamsEqual(s1: Stream, s2: Stream): boolean {
 	if (s1.length !== s2.length) return false;
 	for (let t = 0; t < s1.length; t++) {
 		if (!zsetsEqual(s1.get(t), s2.get(t))) {
