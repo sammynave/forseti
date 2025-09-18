@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import TraditionalPanel from './TraditionalPanel.svelte';
-	import IVMPanel from './IVMPanel.svelte';
-	import PerformanceMetrics from './PerformanceMetrics.svelte';
-	import { DataSimulator } from './DataSimulator.js';
-	import type { Order, User, Product } from './types.js';
+	import TraditionalPanel from '../TraditionalPanel.svelte';
+	import PerformanceMetrics from '../PerformanceMetrics.svelte';
+	import { DataSimulator } from '../DataSimulator.js';
+	import type { Order, User, Product } from '../types.js';
 
 	let dataSimulator: DataSimulator;
 	let isRunning = false;
@@ -137,7 +136,7 @@
 
 <div class="demo-container">
 	<header class="demo-header">
-		<h1>IVM vs Traditional Querying Demo</h1>
+		<h1>Traditional Querying Demo</h1>
 		<p>Real-time E-commerce Analytics Dashboard</p>
 
 		<div class="controls">
@@ -202,7 +201,6 @@
 				that the incremental update is ~.1 ms or 100 microsends. that's faster than the
 				`fromatCurrency` call which is about ~.3ms!
 			</p>
-			<IVMPanel {orders} {users} {products} {resetSignal} bind:metrics={ivmMetrics} />
 		</div>
 	</div>
 

@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import TraditionalPanel from './TraditionalPanel.svelte';
-	import IVMPanel from './IVMPanel.svelte';
-	import PerformanceMetrics from './PerformanceMetrics.svelte';
-	import { DataSimulator } from './DataSimulator.js';
-	import type { Order, User, Product } from './types.js';
+	import IVMPanel from '../IVMPanel.svelte';
+	import PerformanceMetrics from '../PerformanceMetrics.svelte';
+	import { DataSimulator } from '../DataSimulator.js';
+	import type { Order, User, Product } from '../types.js';
 
 	let dataSimulator: DataSimulator;
 	let isRunning = false;
@@ -137,7 +136,7 @@
 
 <div class="demo-container">
 	<header class="demo-header">
-		<h1>IVM vs Traditional Querying Demo</h1>
+		<h1>IVM Querying Demo</h1>
 		<p>Real-time E-commerce Analytics Dashboard</p>
 
 		<div class="controls">
@@ -182,17 +181,6 @@
 	</header>
 
 	<div class="panels-container">
-		<!-- Traditional Approach Panel -->
-		<div class="panel">
-			<h2>🐌 Traditional Approach</h2>
-			<p>Re-computes entire query on every update</p>
-			<p>
-				NOTE: having this going at the same time as IVM slows the IVM updates. maybe hide one then
-				the other or compare in two tabs or use web workers
-			</p>
-			<TraditionalPanel {orders} {users} {products} bind:metrics={traditionalMetrics} />
-		</div>
-
 		<!-- IVM Approach Panel -->
 		<div class="panel">
 			<h2>⚡ IVM Approach</h2>
