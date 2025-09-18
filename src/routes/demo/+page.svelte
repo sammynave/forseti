@@ -186,6 +186,10 @@
 		<div class="panel">
 			<h2>🐌 Traditional Approach</h2>
 			<p>Re-computes entire query on every update</p>
+			<p>
+				NOTE: having this going at the same time as IVM slows the IVM updates. maybe hide one then
+				the other or compare in two tabs or use web workers
+			</p>
 			<TraditionalPanel {orders} {users} {products} bind:metrics={traditionalMetrics} />
 		</div>
 
