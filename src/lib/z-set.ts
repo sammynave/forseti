@@ -1,12 +1,48 @@
 // Z-sets generalize database tables: think of a Z-set as a table where
+
+import type { AbelianGroup } from './operators/integrate.js';
+
+// NOTE: these are instance methods. we will need some state when we get
+// to non-linear aggregation, like `MIN`
+/*
+Section 7.2
+"One way to implement in DBSP the lifted incremental version of such aggregate
+functions is by 'brute force', using the formula (↑a_MIN)^Δ = D ∘ ↑a_MIN ∘ I.
+Such an implementations performs work O(|DB|) at each invocation.
+However, schemes such as Reactive Aggregator can be implemented as custom DBSP
+operators to bring the amortized cost per update to O(log |DB|)."
+*/
+export class ZSetGroup<T> implements AbelianGroup<ZSet<T>> {
+	// 0 = {}(empty);
+	zero(): ZSet<T> {
+		return new ZSet([]);
+	}
+
+	// A = {(x, 3), (y, -1)}
+	// B = {(x, 2), (z, 4)}
+	// A + B = {(x, 5), (y, -1), (z, 4)}
+	// (a + b)[x] = a[x] + b[x]
+	add(a: ZSet<T>, b: ZSet<T>): ZSet<T> {
+		return a.concat(b).mergeRecords();
+	}
+
+	// (a - b)[x] = a[x] - b[x]
+	subtract(a: ZSet<T>, b: ZSet<T>): ZSet<T> {
+		return this.add(a, this.negate(b));
+	}
+
+	// ALGEBRA
+	// A = {(x, 3), (y, -1)}
+	// -A = {(x, -3), (y, 1)}
+	// (-a)[x] = -a[x]
+	negate(a: ZSet<T>): ZSet<T> {
+		return new ZSet(a.data.map(([r, w]) => [r, -w]));
+	}
+}
+
 // each row has an associated weight, possibly negative.
 export class ZSet<T> {
 	#data: Array<[T, number]> = [];
-
-	// 0 = {}(empty);
-	static zero() {
-		return new ZSet([]);
-	}
 
 	constructor(data: Array<[T, number]>) {
 		this.#data = data;
@@ -36,46 +72,30 @@ export class ZSet<T> {
 	min() {}
 	max() {}
 
-	// ALGEBRA
-	// A = {(x, 3), (y, -1)}
-	// -A = {(x, -3), (y, 1)}
-	// (-a)[x] = -a[x]
-	negate() {
-		return new ZSet(this.#data.map(([r, w]) => [r, -w]));
-	}
-
 	// Merges the same records and adds multiplicities
 	mergeRecords(): ZSet<T> {
-		const mergedRecords = new Map();
-		const jsonToValue = new Map();
+		const mergedRecords = new Map<string, number>();
+		const jsonToValue = new Map<string, T>();
 
 		for (const [r, w] of this.#data) {
 			// @PERF - is it okay to stringify everything? is there a faster way?
+			// is there a case for WeakMap here? if primitive, compare directly,
+			// if complex, murmur hash or something?
 			const key = JSON.stringify(r);
 			jsonToValue.set(key, r);
-			mergedRecords.set(key, mergedRecords.has(key) ? mergedRecords.get(key) + w : w);
+			mergedRecords.set(key, (mergedRecords.get(key) ?? 0) + w);
 		}
 
-		const reducer = (acc, [r, w]) => {
+		const reducer = (acc: ZSet<T>, [r, w]: [string, number]) => {
 			if (w === 0) return acc;
-			acc.append([jsonToValue.get(r), w]);
+			const key = jsonToValue.get(r);
+			if (!key) return acc;
+
+			acc.append([key, w]);
 			return acc;
 		};
 
 		return Array.from(mergedRecords.entries()).reduce(reducer, new ZSet([]));
-	}
-
-	// A = {(x, 3), (y, -1)}
-	// B = {(x, 2), (z, 4)}
-	// A + B = {(x, 5), (y, -1), (z, 4)}
-	// (a + b)[x] = a[x] + b[x]
-	add(other: ZSet<T>): ZSet<T | this> {
-		return this.concat(other).mergeRecords();
-	}
-
-	// (a - b)[x] = a[x] - b[x]
-	subtract(other: ZSet<T>): ZSet<T | this> {
-		return this.add(other.negate());
 	}
 
 	// ZSet<1> * 2 => ZSet<2>
@@ -95,8 +115,8 @@ export class ZSet<T> {
 		return new ZSet(this.#data.filter(([r]) => pred(r)));
 	}
 
-	concat(other: ZSet<T>): ZSet<T | this> {
-		const unioned = new ZSet<T | this>([]);
+	concat(other: ZSet<T>): ZSet<T> {
+		const unioned = new ZSet<T>([]);
 		for (const d of this.#data) {
 			unioned.append(d);
 		}

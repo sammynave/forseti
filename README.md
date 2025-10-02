@@ -1,4 +1,4 @@
-https://www.youtube.com/watch?v=iT4k5DCnvPU
+**https**://www.youtube.com/watch?v=iT4k5DCnvPU
 
 - DPSP streaming language has 4 operators
   - 2 operators for SQL

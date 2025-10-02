@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ZSet } from '../../lib/z-set.js';
+import { ZSet, ZSetGroup } from '../../lib/z-set.js';
 
 describe('ZSet', () => {
 	let R: ZSet<string>;
@@ -59,11 +59,12 @@ describe('ZSet', () => {
 		it.todo('max', () => {});
 	});
 	describe('ALGEBRA', () => {
+		const g = new ZSetGroup();
 		describe('abelian group properties', () => {
 			describe('addition (pointwise)', () => {
 				it('should add Z-sets pointwise', () => {
 					// R + S should combine weights for same elements
-					const result = R.add(S);
+					const result = g.add(R, S);
 					// Expected: {joe: 3, anne: -1, bob: 1}
 					const expected = new ZSet([
 						['joe', 3],
@@ -82,7 +83,7 @@ describe('ZSet', () => {
 						['z', 3],
 						['w', -1]
 					]);
-					const result = A.add(B);
+					const result = g.add(A, B);
 					const expected = new ZSet([
 						['x', 2],
 						['y', 1],
@@ -93,20 +94,22 @@ describe('ZSet', () => {
 				});
 
 				it('should satisfy commutativity: a + b = b + a', () => {
-					const ab = R.add(S);
-					const ba = S.add(R);
+					const ab = g.add(R, S);
+					const ba = g.add(S, R);
 					expect(ab.data.sort()).toEqual(ba.data.sort());
 				});
 
 				it('should satisfy associativity: (a + b) + c = a + (b + c)', () => {
-					const abc1 = R.add(S).add(T);
-					const abc2 = R.add(S.add(T));
+					const abc1a = g.add(R, S);
+					const abc1 = g.add(abc1a, T);
+					const abc2a = g.add(R, S);
+					const abc2 = g.add(abc2a, T);
 					expect(abc1.data.sort()).toEqual(abc2.data.sort());
 				});
 
 				it('should have identity element (empty Z-set)', () => {
 					const empty = new ZSet([]);
-					const result = R.add(empty);
+					const result = g.add(R, empty);
 					expect(result.data.sort()).toEqual(R.data.sort());
 				});
 			});
@@ -114,7 +117,7 @@ describe('ZSet', () => {
 			describe('subtraction (pointwise)', () => {
 				it('should subtract Z-sets pointwise', () => {
 					// R - S: {joe: 1-2, anne: -1-0, bob: 0-1}
-					const result = R.subtract(S);
+					const result = g.subtract(R, S);
 					const expected = new ZSet([
 						['joe', -1],
 						['anne', -1],
@@ -129,7 +132,7 @@ describe('ZSet', () => {
 						['y', 2]
 					]);
 					const B = new ZSet([['x', 2]]);
-					const result = A.subtract(B);
+					const result = g.subtract(A, B);
 					const expected = new ZSet([
 						['x', 3],
 						['y', 2]
@@ -143,7 +146,7 @@ describe('ZSet', () => {
 						['x', 1],
 						['y', 4]
 					]);
-					const result = A.subtract(B);
+					const result = g.subtract(A, B);
 					const expected = new ZSet([
 						['x', 2],
 						['y', -4]
@@ -152,8 +155,8 @@ describe('ZSet', () => {
 				});
 
 				it('should satisfy a - b = a + (-b)', () => {
-					const direct = R.subtract(S);
-					const indirect = R.add(S.negate());
+					const direct = g.subtract(R, S);
+					const indirect = g.add(R, g.negate(S));
 					expect(direct.data).toEqual(indirect.data);
 				});
 
@@ -166,14 +169,14 @@ describe('ZSet', () => {
 						['x', 2],
 						['y', -4]
 					]);
-					const result = a.subtract(b);
+					const result = g.subtract(a, b);
 					expect(result.data).toStrictEqual([['y', 5]]);
 				});
 			});
 
 			describe('negate', () => {
 				it('should negate all weights', () => {
-					const result = R.negate();
+					const result = g.negate(R);
 					const expected = new ZSet([
 						['joe', -1],
 						['anne', 1]
@@ -182,7 +185,7 @@ describe('ZSet', () => {
 				});
 
 				it('should satisfy a + (-a) = 0', () => {
-					const result = R.add(R.negate());
+					const result = g.add(R, g.negate(R));
 					// Should result in empty Z-set (all weights cancel to 0)
 					expect(result.data).toEqual([]);
 				});
@@ -222,7 +225,7 @@ describe('ZSet', () => {
 					['joe', -1],
 					['anne', 1]
 				]);
-				expect(zset.mergeRecords()).toStrictEqual(ZSet.zero());
+				expect(zset.mergeRecords()).toStrictEqual(g.zero());
 			});
 			it('should handle a simple case', () => {
 				const zset = new ZSet([
@@ -306,9 +309,9 @@ describe('ZSet', () => {
 				const empty = new ZSet([]);
 				const nonEmpty = new ZSet([['a', 1]]);
 
-				expect(empty.add(nonEmpty).data).toEqual(nonEmpty.data);
-				expect(empty.subtract(nonEmpty).data).toEqual([['a', -1]]);
-				expect(empty.negate().data).toEqual([]);
+				expect(g.add(empty, nonEmpty).data).toEqual(nonEmpty.data);
+				expect(g.subtract(empty, nonEmpty).data).toEqual([['a', -1]]);
+				expect(g.negate(empty).data).toEqual([]);
 			});
 
 			it('should remove elements with zero weight after operations', () => {
@@ -321,7 +324,7 @@ describe('ZSet', () => {
 					['z', 1]
 				]);
 
-				const result = a.subtract(b);
+				const result = g.subtract(a, b);
 				// x: 2-2=0 should be removed, y: 1-0=1, z: 0-1=-1
 				const expected = new ZSet([
 					['y', 1],
@@ -341,7 +344,7 @@ describe('ZSet', () => {
 					[['kiwi', '$3'], 1]
 				]);
 
-				const result = zset.add(other);
+				const result = g.add(zset, other);
 				// Should combine weights for ['apple', '$5']
 				expect(result.data).toContainEqual([['apple', '$5'], 3]);
 			});
@@ -351,7 +354,7 @@ describe('ZSet', () => {
 					[{ name: 'joe', age: 30 }, 1],
 					[{ name: 'anne', age: 25 }, -1]
 				]);
-				const result = zset.negate();
+				const result = g.negate(zset);
 
 				expect(result.data).toEqual([
 					[{ name: 'joe', age: 30 }, -1],
