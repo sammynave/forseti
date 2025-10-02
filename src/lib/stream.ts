@@ -10,14 +10,14 @@ export type StreamOperator<A, B> = (input: Stream<A>) => Stream<B>;
 export class Stream<Z> {
 	private values = new Map<number, Z>();
 	private currentTime = 0;
-	private defaultValue: Z;
+	private groupZero: Z;
 
-	constructor(defaultValue: Z) {
-		this.defaultValue = defaultValue;
+	constructor(groupZero: Z) {
+		this.groupZero = groupZero;
 	}
 
 	at(time: number): Z {
-		return this.values.get(time) ?? this.defaultValue;
+		return this.values.get(time) ?? this.groupZero; // Use group zero, not arbitrary default
 	}
 
 	// Set value at specific time (for construction)
@@ -51,4 +51,24 @@ export function incrementalize<A, B>(
 		const differentiated = differentiate(groupB)(queried);
 		return differentiated;
 	};
+}
+
+// Helper for creating tuple streams
+export function createTupleStream<A, B>(
+	streamA: Stream<A>,
+	streamB: Stream<B>,
+	defaultA: A,
+	defaultB: B
+): Stream<[A, B]> {
+	const result = new Stream<[A, B]>([defaultA, defaultB]);
+
+	const allTimes = new Set<number>();
+	for (const [time] of streamA.entries()) allTimes.add(time);
+	for (const [time] of streamB.entries()) allTimes.add(time);
+
+	for (const time of allTimes) {
+		result.set(time, [streamA.at(time), streamB.at(time)]);
+	}
+
+	return result;
 }

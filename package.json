@@ -12,6 +12,7 @@
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"test:unit": "vitest",
+		"bench": "vitest bench",
 		"test": "npm run test:unit -- --run"
 	},
 	"files": [

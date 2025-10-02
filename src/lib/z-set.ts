@@ -116,3 +116,26 @@ export class ZSet<T> {
 		return unioned;
 	}
 }
+// Group for tuples (needed for bilinear operators)
+export class TupleGroup<A, B> implements AbelianGroup<[A, B]> {
+	constructor(
+		private groupA: AbelianGroup<A>,
+		private groupB: AbelianGroup<B>
+	) {}
+
+	zero(): [A, B] {
+		return [this.groupA.zero(), this.groupB.zero()];
+	}
+
+	add(a: [A, B], b: [A, B]): [A, B] {
+		return [this.groupA.add(a[0], b[0]), this.groupB.add(a[1], b[1])];
+	}
+
+	subtract(a: [A, B], b: [A, B]): [A, B] {
+		return [this.groupA.subtract(a[0], b[0]), this.groupB.subtract(a[1], b[1])];
+	}
+
+	negate(a: [A, B]): [A, B] {
+		return [this.groupA.negate(a[0]), this.groupB.negate(a[1])];
+	}
+}
