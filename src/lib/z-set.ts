@@ -66,12 +66,6 @@ export class ZSet<T> {
 		return this.#data.length === 0;
 	}
 
-	// Aggregates
-	count() {}
-	sum() {}
-	min() {}
-	max() {}
-
 	// Merges the same records and adds multiplicities
 	mergeRecords(): ZSet<T> {
 		const mergedRecords = new Map<string, number>();
@@ -110,11 +104,6 @@ export class ZSet<T> {
 		}, new ZSet([]));
 	}
 
-	// Linear operation: Preserves weights
-	filter(pred: (i: T) => boolean): ZSet<T> {
-		return new ZSet(this.#data.filter(([r]) => pred(r)));
-	}
-
 	concat(other: ZSet<T>): ZSet<T> {
 		const unioned = new ZSet<T>([]);
 		for (const d of this.#data) {
@@ -126,21 +115,4 @@ export class ZSet<T> {
 
 		return unioned;
 	}
-
-	// RELATIONAL
-	// distinct(m)[x] = 1 if m[x] > 0, else 0
-	distinct() {
-		const map = this.mergeRecords().data.reduce((acc, [r, w]) => {
-			if (w < 1) return acc;
-			if (acc.has(r)) return acc;
-
-			acc.set(r, 1);
-			return acc;
-		}, new Map());
-		return new ZSet(Array.from(map.entries()));
-	}
-
-	//  Bilinear operation for combining Z-sets
-	// `(a ⊲⊳ b)[(x,y)] = a[x] × b[y]` if join condition met
-	join(other: ZSet<T>): ZSet<T> {}
 }

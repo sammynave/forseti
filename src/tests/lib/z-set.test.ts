@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ZSet, ZSetGroup } from '../../lib/z-set.js';
 
-describe('ZSet', () => {
+describe.only('ZSet', () => {
 	let R: ZSet<string>;
 	let S: ZSet<string>;
 	let T: ZSet<string>;
@@ -206,16 +206,6 @@ describe('ZSet', () => {
 				expect(result.data).toEqual([]);
 			});
 		});
-		describe('filter', () => {
-			it('can filter', () => {
-				const result = R.filter((name) => name === 'joe');
-				expect(result.data).toStrictEqual([['joe', 1]]);
-			});
-			it('can filter', () => {
-				const result = R.filter((name) => name === 'anne');
-				expect(result.data).toStrictEqual([['anne', -1]]);
-			});
-		});
 
 		describe('mergeRecords', () => {
 			it('should handle a zero case', () => {
@@ -362,54 +352,6 @@ describe('ZSet', () => {
 				]);
 			});
 		});
-	});
-
-	describe('RELATIONAL', () => {
-		describe('distinct operation', () => {
-			it('should convert positive weights to 1, remove non-positive', () => {
-				const mixed = new ZSet([
-					['a', 3],
-					['b', -1],
-					['b', 3],
-					['c', 1],
-					['d', 0]
-				]);
-				const result = mixed.distinct();
-				const expected = new ZSet([
-					['a', 1],
-					['b', 1],
-					['c', 1]
-				]);
-				expect(result.data).toStrictEqual(expected.data);
-			});
-			it('should convert positive weights to 1, remove non-positive', () => {
-				const mixed = new ZSet([
-					['a', 3],
-					['b', 1],
-					['b', -3],
-					['c', 1],
-					['d', 0]
-				]);
-				const result = mixed.distinct();
-				const expected = new ZSet([
-					['a', 1],
-					['c', 1]
-				]);
-				expect(result.data).toStrictEqual(expected.data);
-			});
-
-			it('should handle DBSP paper example', () => {
-				// distinct(R) = {joe ↦ 1} (anne has negative weight)
-				const result = R.distinct();
-				const expected = new ZSet([['joe', 1]]);
-				expect(result.data).toEqual(expected.data);
-			});
-		});
-		describe.todo('join', () => {});
-		describe.todo('union', () => {});
-		describe.todo('except', () => {});
-		describe.todo('intersect', () => {});
-		describe.todo('where', () => {});
 	});
 
 	describe('TYPE PREDICATES', () => {

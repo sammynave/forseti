@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { lift } from '$lib/operators/lift.js';
 import { ZSet, ZSetGroup } from '$lib/z-set.js';
 import { Stream } from '$lib/stream.js';
+import { ZSetOperators } from '$lib/z-set-operators.js';
 
 describe('lift', () => {
 	let g: ZSetGroup<string>;
@@ -182,7 +183,8 @@ describe('lift', () => {
 			input.set(0, mixedZSet);
 
 			// Lift the distinct operation
-			const liftDistinct = lift((zset: ZSet<string>) => zset.distinct());
+			// const liftDistinct = lift((zset: ZSet<string>) => zset.distinct());
+			const liftDistinct = lift((zset: ZSet<string>) => ZSetOperators.distinct(zset));
 			const output = liftDistinct(input);
 
 			// Should convert to set: only positive weights become 1
