@@ -37,9 +37,6 @@ export class Circuit<A, B> {
 		return new Circuit(op);
 	}
 
-	/*
-	 * @TODO perf this
-	 */
 	static oldequiJoin<T, U, K>(
 		keyA: (t: T) => K,
 		keyB: (u: U) => K

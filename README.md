@@ -1,3 +1,10 @@
+# TODO
+
+- [ ] stateful-circuit and stateful-join are probably not what we want. let's rewrite to use `circuit.ts`. then optimize for perf. maybe have some external state we could pass to it to update/read from when processing incremental updates
+- [ ] `optimzation.ts` should be removed. those methods should be defined elsewhere (stream or circuit probably)
+- [ ] go through the paper again and highlight what we think are constructs and write out their responsibilities in a tldraw doc
+
+
 **https**://www.youtube.com/watch?v=iT4k5DCnvPU
 
 - DPSP streaming language has 4 operators
