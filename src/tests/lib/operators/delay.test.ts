@@ -15,15 +15,15 @@ describe('delay', () => {
 	});
 
 	describe('basic delay functionality', () => {
-		it('should delay empty Z-set and return default value at time 0', () => {
+		it('should delay empty Z-set and return group zero at time 0', () => {
 			const input = new Stream(emptyZSet);
 			// Input stream is empty (no values set)
 
-			const delayOp = delay(defaultZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			// At time 0, should return the default value
-			expect(output.at(0)).toEqual(defaultZSet);
+			// At time 0, should return the group zero (per DBSP spec)
+			expect(output.at(0)).toEqual(emptyZSet);
 			// At time 1, should return empty Z-set (input at time 0)
 			expect(output.at(1)).toEqual(emptyZSet);
 		});
@@ -36,24 +36,25 @@ describe('delay', () => {
 			]);
 			input.set(0, inputZSet);
 
-			const delayOp = delay(defaultZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			expect(output.at(0)).toEqual(defaultZSet);
+			expect(output.at(0)).toEqual(emptyZSet); // Group zero at time 0
 			expect(output.at(1)).toEqual(inputZSet);
 		});
 	});
 
 	describe('DBSP core properties', () => {
-		it('should satisfy default value property: s[-1] = defaultValue', () => {
+		it('should satisfy DBSP spec: z^(-1)(s)[0] = 0_A (group zero)', () => {
 			const input = new Stream(emptyZSet);
-			const customDefault = new ZSet([['initial', 2]]);
+			const inputZSet = new ZSet([['initial', 2]]);
+			input.set(0, inputZSet);
 
-			const delayOp = delay(customDefault);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			// The "s[-1]" is represented as output at time 0
-			expect(output.at(0)).toEqual(customDefault);
+			// Per DBSP spec, output at time 0 should always be group zero
+			expect(output.at(0)).toEqual(emptyZSet);
 		});
 
 		it('should satisfy time shift property: output[t+1] = input[t]', () => {
@@ -66,10 +67,11 @@ describe('delay', () => {
 			input.set(1, zset2);
 			input.set(2, zset3);
 
-			const delayOp = delay(defaultZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
 			// Verify the shift: output[t+1] should equal input[t]
+			expect(output.at(0)).toEqual(emptyZSet); // Always group zero at time 0
 			expect(output.at(1)).toEqual(zset1); // output[1] = input[0]
 			expect(output.at(2)).toEqual(zset2); // output[2] = input[1]
 			expect(output.at(3)).toEqual(zset3); // output[3] = input[2]
@@ -83,7 +85,7 @@ describe('delay', () => {
 			// Set value at time 0
 			input.set(0, zsetAtTime0);
 
-			const delayOp = delay(defaultZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
 			// Output at time 1 should only depend on input before time 1 (i.e., time 0)
@@ -107,10 +109,10 @@ describe('delay', () => {
 			]);
 			input.set(0, paperExample);
 
-			const delayOp = delay(emptyZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			const delayedResult = output.at(1);
+			const delayedResult = output.at(1) as ZSet<string>;
 			expect(delayedResult.data).toEqual(paperExample.data);
 
 			// Verify weights are preserved
@@ -130,10 +132,10 @@ describe('delay', () => {
 
 			input.set(0, mergedZSet);
 
-			const delayOp = delay(emptyZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			const result = output.at(1);
+			const result = output.at(1) as ZSet<string>;
 			expect(result.data).toEqual(mergedZSet.data);
 		});
 	});
@@ -152,11 +154,11 @@ describe('delay', () => {
 			input.set(2, zset2);
 			input.set(5, zset5);
 
-			const delayOp = delay(defaultZSet);
+			const delayOp = delay(g);
 			const output = delayOp(input);
 
-			// Verify complete delay behavior
-			expect(output.at(0)).toEqual(defaultZSet); // Default at time 0
+			// Verify complete delay behavior per DBSP spec
+			expect(output.at(0)).toEqual(emptyZSet); // Always group zero at time 0
 			expect(output.at(1)).toEqual(zset0); // input[0] delayed to output[1]
 			expect(output.at(2)).toEqual(zset1); // input[1] delayed to output[2]
 			expect(output.at(3)).toEqual(zset2); // input[2] delayed to output[3]

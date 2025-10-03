@@ -23,6 +23,22 @@ export class ZSetGroup<T> implements AbelianGroup<ZSet<T>> {
 	// A + B = {(x, 5), (y, -1), (z, 4)}
 	// (a + b)[x] = a[x] + b[x]
 	add(a: ZSet<T>, b: ZSet<T>): ZSet<T> {
+		// Early exit optimizations
+		if (a.isEmpty()) return b;
+		if (b.isEmpty()) return a;
+
+		// If both are already merged, we can do a more efficient merge
+		if (a.isMerged() && b.isMerged()) {
+			return this.fastMerge(a, b);
+		}
+
+		return a.concat(b).mergeRecords();
+	}
+
+	// Efficient merge for already-merged ZSets
+	private fastMerge(a: ZSet<T>, b: ZSet<T>): ZSet<T> {
+		// For now, fall back to the standard merge approach
+		// TODO: Implement proper fast merge with public key access methods
 		return a.concat(b).mergeRecords();
 	}
 
@@ -43,6 +59,8 @@ export class ZSetGroup<T> implements AbelianGroup<ZSet<T>> {
 // each row has an associated weight, possibly negative.
 export class ZSet<T> {
 	#data: Array<[T, number]> = [];
+	#keyCache: Map<T, string> = new Map();
+	#isMerged: boolean = false;
 
 	constructor(data: Array<[T, number]>) {
 		this.#data = data;
@@ -51,8 +69,23 @@ export class ZSet<T> {
 	get data() {
 		return this.#data;
 	}
+
 	append(d: [T, number]) {
 		this.#data.push(d);
+		this.#isMerged = false; // Mark as unmerged when adding data
+	}
+
+	isMerged(): boolean {
+		return this.#isMerged;
+	}
+
+	private getOrComputeKey(record: T): string {
+		if (this.#keyCache.has(record)) {
+			return this.#keyCache.get(record)!;
+		}
+		const key = JSON.stringify(record);
+		this.#keyCache.set(record, key);
+		return key;
 	}
 
 	// type predicates
@@ -68,28 +101,37 @@ export class ZSet<T> {
 
 	// Merges the same records and adds multiplicities
 	mergeRecords(): ZSet<T> {
-		const mergedRecords = new Map<string, number>();
-		const jsonToValue = new Map<string, T>();
-
-		for (const [r, w] of this.#data) {
-			// @PERF - is it okay to stringify everything? is there a faster way?
-			// is there a case for WeakMap here? if primitive, compare directly,
-			// if complex, murmur hash or something?
-			const key = JSON.stringify(r);
-			jsonToValue.set(key, r);
-			mergedRecords.set(key, (mergedRecords.get(key) ?? 0) + w);
+		if (this.#isMerged) {
+			return this; // Already merged, return self
 		}
 
-		const reducer = (acc: ZSet<T>, [r, w]: [string, number]) => {
-			if (w === 0) return acc;
-			const key = jsonToValue.get(r);
-			if (!key) return acc;
+		const mergedRecords = new Map<string, [T, number]>(); // key -> [record, totalWeight]
 
-			acc.append([key, w]);
-			return acc;
-		};
+		for (const [record, weight] of this.#data) {
+			// Use cached key computation to avoid repeated JSON.stringify
+			const key = this.getOrComputeKey(record);
 
-		return Array.from(mergedRecords.entries()).reduce(reducer, new ZSet([]));
+			if (mergedRecords.has(key)) {
+				const [existingRecord, existingWeight] = mergedRecords.get(key)!;
+				mergedRecords.set(key, [existingRecord, existingWeight + weight]);
+			} else {
+				mergedRecords.set(key, [record, weight]);
+			}
+		}
+
+		// Build result ZSet with non-zero weights
+		const result = new ZSet<T>([]);
+		for (const [record, weight] of mergedRecords.values()) {
+			if (weight !== 0) {
+				result.append([record, weight]);
+				// Transfer cached key to result
+				const key = this.getOrComputeKey(record);
+				result.#keyCache.set(record, key);
+			}
+		}
+
+		result.#isMerged = true;
+		return result;
 	}
 
 	// ZSet<1> * 2 => ZSet<2>

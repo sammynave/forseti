@@ -57,10 +57,10 @@ export function incrementalize<A, B>(
 export function createTupleStream<A, B>(
 	streamA: Stream<A>,
 	streamB: Stream<B>,
-	defaultA: A,
-	defaultB: B
+	groupA: AbelianGroup<A>,
+	groupB: AbelianGroup<B>
 ): Stream<[A, B]> {
-	const result = new Stream<[A, B]>([defaultA, defaultB]);
+	const result = new Stream<[A, B]>([groupA.zero(), groupB.zero()]);
 
 	const allTimes = new Set<number>();
 	for (const [time] of streamA.entries()) allTimes.add(time);

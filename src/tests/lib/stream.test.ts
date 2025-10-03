@@ -181,7 +181,7 @@ describe('Stream', () => {
 		it('should handle complex DBSP circuit composition', () => {
 			// Create a more complex query: delay then double
 			const delayThenDouble = (stream: Stream<ZSet<string>>) => {
-				const delayed = delay(emptyZSet)(stream);
+				const delayed = delay(g)(stream);
 				return lift((zset: ZSet<string>) => zset.multiply(2))(delayed);
 			};
 

@@ -6,6 +6,7 @@ import { ZSetOperators } from '../../lib/z-set-operators.js';
 import { Circuit } from '../../lib/circuit.js';
 import { generateOrders, generateUsers, type Order, type User } from '../../benchmarks/helpers.js';
 import { integrate } from '$lib/operators/integrate.js';
+import { createStatefulJoinCircuit } from '$lib/stateful-circuit.js';
 
 describe('Circuit Incremental Computation', () => {
 	describe('equiJoin incremental behavior', () => {
@@ -62,7 +63,9 @@ describe('Circuit Incremental Computation', () => {
 			userChanges.set(1, users1);
 			userChanges.set(2, users2);
 
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
+			const orderGroup = new ZSetGroup<Order>();
+			const userGroup = new ZSetGroup<User>();
+			const inputStream = createTupleStream(orderChanges, userChanges, orderGroup, userGroup);
 
 			// Execute incremental computation
 			const incrementalResults = incrementalJoin.execute(inputStream);
@@ -71,7 +74,7 @@ describe('Circuit Incremental Computation', () => {
 
 			// Manually compute what the full state should be at each time
 			const group = new ZSetGroup<Order>();
-			const userGroup = new ZSetGroup<User>();
+			const userGroupForComparison = new ZSetGroup<User>();
 
 			// Time 0: Full state
 			let fullOrders0 = orders0;
@@ -147,7 +150,9 @@ describe('Circuit Incremental Computation', () => {
 			userChanges.set(0, initialUsers);
 			userChanges.set(1, new ZSet([])); // No user changes
 
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
+			const orderGroup2 = new ZSetGroup<Order>();
+			const userGroup2 = new ZSetGroup<User>();
+			const inputStream = createTupleStream(orderChanges, userChanges, orderGroup2, userGroup2);
 
 			const results = incrementalJoin.execute(inputStream);
 
@@ -187,7 +192,9 @@ describe('Circuit Incremental Computation', () => {
 			userChanges.set(0, users);
 			userChanges.set(1, new ZSet([]));
 
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
+			const orderGroup3 = new ZSetGroup<Order>();
+			const userGroup3 = new ZSetGroup<User>();
+			const inputStream = createTupleStream(orderChanges, userChanges, orderGroup3, userGroup3);
 
 			const results = incrementalJoin.execute(inputStream);
 
@@ -226,7 +233,9 @@ describe('Circuit Incremental Computation', () => {
 			userChanges.set(0, new ZSet(USERS.map((u) => [u, 1])));
 			userChanges.set(1, new ZSet([])); // No user changes
 
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
+			const orderGroup4 = new ZSetGroup<Order>();
+			const userGroup4 = new ZSetGroup<User>();
+			const inputStream = createTupleStream(orderChanges, userChanges, orderGroup4, userGroup4);
 
 			// Execute incremental computation - this gives us CHANGES
 			const incrementalChanges = incrementalJoin.execute(inputStream);
@@ -258,6 +267,83 @@ describe('Circuit Incremental Computation', () => {
 			// ========== COMPARISON ==========
 			// Now these should match!
 			expect(incrementalFinalState.data).toStrictEqual(nonIncrementalResult.data);
+		});
+	});
+
+	describe('DBSP: True Incremental vs Batch Processing', () => {
+		it.only('should produce same final state as batch processing', () => {
+			const USERS_COUNT = 1000;
+			const INITIAL_ORDERS = 10000;
+			const NEW_ORDERS = 100;
+
+			const users = generateUsers(USERS_COUNT);
+			const userIds = users.map((u) => u.id);
+			const initialOrders = generateOrders(INITIAL_ORDERS, userIds);
+			const newOrders = generateOrders(NEW_ORDERS, userIds);
+			// const users = [{ id: 'user0', name: 'User 0', age: 63 }];
+			// const initialOrders = [{ id: 0, userId: 'user0', amount: 644 }];
+			// const newOrders = [{ id: 1, userId: 'user0', amount: 568 }]; // Different ID
+
+			// Create stateful join circuit (maintains state between executions)
+			const statefulJoinCircuit = createStatefulJoinCircuit<Order, User, string>(
+				(order) => order.userId,
+				(user) => user.id
+			);
+
+			// Initialize circuit with base data ONCE (not timed)
+			// console.profile('inc');
+			const initialUsersZSet = new ZSet(users.map((u) => [u, 1]));
+			const initialOrdersZSet = new ZSet(initialOrders.map((o) => [o, 1]));
+			// TODO
+			// TODO
+			// TODO
+			// i don't think this is materializing the view the same way that processIncrement does
+			statefulJoinCircuit.initialize(initialOrdersZSet, initialUsersZSet);
+
+			const oneNew = generateOrders(1, userIds);
+			const oneNewZ = new ZSet(oneNew.map((o) => [o, 1]));
+			const initEmptyUsersZSet = new ZSet<User>([]);
+
+			statefulJoinCircuit.processIncrement(oneNewZ, initEmptyUsersZSet);
+
+			// Process only the new orders (delta) - users delta is empty
+			const newOrdersZSet = new ZSet(newOrders.map((o) => [o, 1]));
+			const emptyUsersZSet = new ZSet<User>([]);
+
+			// Process the increment (this returns only the delta)
+			// console.profile('inc');
+			const deltaResult = statefulJoinCircuit.processIncrement(newOrdersZSet, emptyUsersZSet);
+
+			// ========== INCREMENTAL APPROACH: Get complete final state ==========
+			// Use the new getMaterializedView method for efficiency
+			const incrementalCompleteResult = statefulJoinCircuit.getMaterializedView();
+			// console.profileEnd('inc');
+
+			console.profile('batch');
+			// ========== BATCH APPROACH: Full recomputation from scratch ==========
+			const allOrders = [...initialOrders, ...oneNew, ...newOrders];
+			const ordersZSet = new ZSet(allOrders.map((o) => [o, 1]));
+			const usersZSet = new ZSet(users.map((u) => [u, 1]));
+
+			const batchResult = ZSetOperators.equiJoin(
+				ordersZSet,
+				usersZSet,
+				(order) => order.userId,
+				(user) => user.id
+			);
+			console.profileEnd('batch');
+			// ========== COMPARISON: Final states should be identical ==========
+			expect(incrementalCompleteResult.data.sort()).toStrictEqual(batchResult.data.sort());
+
+			// ========== OPTIONAL: Verify the delta is correct ==========
+			// The delta should only contain the new order joined with the user
+			// const expectedDelta = ZSetOperators.equiJoin(
+			// 	newOrdersZSet,
+			// 	usersZSet,
+			// 	(order) => order.userId,
+			// 	(user) => user.id
+			// );
+			// expect(deltaResult.data.sort()).toStrictEqual(expectedDelta.data.sort());
 		});
 	});
 });

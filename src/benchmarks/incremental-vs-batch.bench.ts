@@ -1,221 +1,135 @@
-// src/benchmarks/incremental-vs-batch.bench.ts
-import { describe, bench, expect } from 'vitest';
-import { Stream, createTupleStream } from '../lib/stream.js';
-import { ZSet, ZSetGroup } from '../lib/z-set.js';
+import { describe, bench } from 'vitest';
+import { ZSet } from '../lib/z-set.js';
 import { ZSetOperators } from '../lib/z-set-operators.js';
-import { Circuit } from '../lib/circuit.js';
+import { createStatefulJoinCircuit } from '../lib/stateful-circuit.js';
 import { generateOrders, generateUsers, type Order, type User } from './helpers.js';
-import { integrate } from '$lib/operators/integrate.js';
 
-describe('Incremental vs Non-Incremental Benchmarks', () => {
-	// ========== SCENARIO 1: Small Changes to Large Dataset ==========
-	describe.only('Large dataset, small changes (ideal for incremental)', () => {
-		const USERS = generateUsers(1000);
-		const USER_IDS = USERS.map((u) => u.id);
-		const INITIAL_ORDERS = generateOrders(10000, USER_IDS);
-		const NEW_ORDERS = generateOrders(100, USER_IDS); // Only 1% new data
+describe.only('DBSP: True Incremental vs Batch Processing', () => {
+	// Smaller dataset to focus on algorithmic difference
+	const USERS_COUNT = 100;
+	const INITIAL_ORDERS = 1000;
+	const NEW_ORDERS = 100;
 
-		// ========== INCREMENTAL COMPUTATION ==========
-		const incrementalJoin = Circuit.equiJoin<Order, User, string>(
+	const users = generateUsers(USERS_COUNT);
+	const userIds = users.map((u) => u.id);
+	const initialOrders = generateOrders(INITIAL_ORDERS, userIds);
+	const newOrders = generateOrders(NEW_ORDERS, userIds);
+
+	// Create stateful join circuit (maintains state between executions)
+	const statefulJoinCircuit = createStatefulJoinCircuit<Order, User, string>(
+		(order) => order.userId,
+		(user) => user.id
+	);
+
+	// Initialize circuit with base data ONCE (not timed)
+	const initialUsersZSet = new ZSet(users.map((u) => [u, 1]));
+	const initialOrdersZSet = new ZSet(initialOrders.map((o) => [o, 1]));
+	statefulJoinCircuit.initialize(initialOrdersZSet, initialUsersZSet);
+	const e = new ZSet<User>([]);
+	statefulJoinCircuit.processIncrement(initialOrdersZSet, e);
+
+	bench('Incremental Streaming', () => {
+		// TRUE STREAMING: Process each order individually and materialize after each
+		const emptyUsersZSet = new ZSet<User>([]);
+
+		for (const order of newOrders) {
+			// Process single order delta
+			const singleOrderZSet = new ZSet([[order, 1]]);
+			statefulJoinCircuit.processIncrement(singleOrderZSet, emptyUsersZSet);
+
+			// Materialize view after each delta (O(1) - cached!)
+			const view = statefulJoinCircuit.getMaterializedView();
+
+			if (view.isEmpty()) {
+				console.error('Expected non-empty incremental result');
+				throw new Error('Expected non-empty incremental result');
+			}
+		}
+	});
+
+	let currentOrders = [...initialOrders];
+	const usersZSet = new ZSet(users.map((u) => [u, 1]));
+	bench('Batch Streaming Recomputation', () => {
+		// STREAMING BATCH: Recompute from scratch after each new order
+
+		for (const order of newOrders) {
+			// Add new order to dataset
+			currentOrders.push(order);
+
+			// Full recomputation from scratch (O(|DB|) every time!)
+			const ordersZSet = new ZSet(currentOrders.map((o) => [o, 1]));
+			const result = ZSetOperators.equiJoin(
+				ordersZSet,
+				usersZSet,
+				(order) => order.userId,
+				(user) => user.id
+			);
+
+			if (result.isEmpty()) {
+				console.error('Expected non-empty batch result');
+				throw new Error('Expected non-empty batch result');
+			}
+		}
+	});
+});
+
+describe('bench 1 change', () => {
+	const USERS_COUNT = 10_000;
+	const INITIAL_ORDERS = 100_000;
+	const NEW_ORDERS = 100;
+
+	const users = generateUsers(USERS_COUNT);
+	const userIds = users.map((u) => u.id);
+	const initialOrders = generateOrders(INITIAL_ORDERS, userIds);
+	const newOrders = generateOrders(NEW_ORDERS, userIds);
+	// const users = [{ id: 'user0', name: 'User 0', age: 63 }];
+	// const initialOrders = [{ id: 0, userId: 'user0', amount: 644 }];
+	// const newOrders = [{ id: 1, userId: 'user0', amount: 568 }]; // Different ID
+
+	// Create stateful join circuit (maintains state between executions)
+	const statefulJoinCircuit = createStatefulJoinCircuit<Order, User, string>(
+		(order) => order.userId,
+		(user) => user.id
+	);
+
+	// Initialize circuit with base data ONCE (not timed)
+	// console.profile('inc');
+	const initialUsersZSet = new ZSet(users.map((u) => [u, 1]));
+	const initialOrdersZSet = new ZSet(initialOrders.map((o) => [o, 1]));
+	// TODO
+	// TODO
+	// TODO
+	// i don't think this is materializing the view the same way that processIncrement does
+	statefulJoinCircuit.initialize(initialOrdersZSet, initialUsersZSet);
+
+	const oneNew = generateOrders(1, userIds);
+	const oneNewZ = new ZSet(oneNew.map((o) => [o, 1]));
+	const initEmptyUsersZSet = new ZSet<User>([]);
+
+	statefulJoinCircuit.processIncrement(oneNewZ, initEmptyUsersZSet);
+
+	// Process only the new orders (delta) - users delta is empty
+
+	// Process the increment (this returns only the delta)
+	const newOrdersZSet = new ZSet(newOrders.map((o) => [o, 1]));
+	const emptyUsersZSet = new ZSet<User>([]);
+	bench('inc', () => {
+		const deltaResult = statefulJoinCircuit.processIncrement(newOrdersZSet, emptyUsersZSet);
+
+		// ========== INCREMENTAL APPROACH: Get complete final state ==========
+		// Use the new getMaterializedView method for efficiency
+		const incrementalCompleteResult = statefulJoinCircuit.getMaterializedView();
+	});
+	// ========== BATCH APPROACH: Full recomputation from scratch ==========
+	const allOrders = [...initialOrders, ...oneNew, ...newOrders];
+	const ordersZSet = new ZSet(allOrders.map((o) => [o, 1]));
+	const usersZSet = new ZSet(users.map((u) => [u, 1]));
+	bench('batch', () => {
+		const batchResult = ZSetOperators.equiJoin(
+			ordersZSet,
+			usersZSet,
 			(order) => order.userId,
 			(user) => user.id
 		);
-
-		// Setup streams
-		const orderChanges = new Stream<ZSet<Order>>(new ZSet([]));
-		orderChanges.set(0, new ZSet(INITIAL_ORDERS.map((o) => [o, 1])));
-		orderChanges.set(1, new ZSet(NEW_ORDERS.map((o) => [o, 1])));
-
-		const userChanges = new Stream<ZSet<User>>(new ZSet([]));
-		userChanges.set(0, new ZSet(USERS.map((u) => [u, 1])));
-		userChanges.set(1, new ZSet([])); // No user changes
-
-		const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
-
-		// Execute incremental computation - this gives us CHANGES
-		const incrementalChanges = incrementalJoin.execute(inputStream);
-
-		// ========== INTEGRATE THE CHANGES TO GET FINAL STATE ==========
-		const resultGroup = new ZSetGroup<[Order, User]>();
-		const integrateOp = integrate(resultGroup);
-		const integratedResults = integrateOp(incrementalChanges);
-
-		bench('incremental', () => {
-			// Get the final integrated state (cumulative result)
-			const incrementalFinalState = integratedResults.at(1); // Time 1 is the final time
-			incrementalFinalState.data;
-		});
-
-		bench('non-incremental', () => {
-			// ========== NON-INCREMENTAL COMPUTATION ==========
-			// Simulate non-incremental: recompute everything from scratch
-			const allOrders = new ZSet([
-				...INITIAL_ORDERS.map((o) => [o, 1] as [Order, number]),
-				...NEW_ORDERS.map((o) => [o, 1] as [Order, number])
-			]);
-			const allUsers = new ZSet(USERS.map((u) => [u, 1] as [User, number]));
-
-			// Full recomputation
-			const nonIncrementalResult = ZSetOperators.equiJoin(
-				allOrders,
-				allUsers,
-				(order) => order.userId,
-				(user) => user.id
-			);
-			nonIncrementalResult.data;
-		});
-	});
-
-	// ========== SCENARIO 2: Many Small Updates ==========
-	describe('Many small updates over time', () => {
-		const USERS = generateUsers(100);
-		const USER_IDS = USERS.map((u) => u.id);
-		const UPDATE_COUNT = 100;
-		const ORDERS_PER_UPDATE = 10;
-
-		bench('Incremental Join - Many small updates', () => {
-			const incrementalJoin = Circuit.equiJoin<Order, User, string>(
-				(order) => order.userId,
-				(user) => user.id
-			);
-
-			const orderChanges = new Stream<ZSet<Order>>(new ZSet([]));
-			const userChanges = new Stream<ZSet<User>>(new ZSet([]));
-
-			// Initial data
-			userChanges.set(0, new ZSet(USERS.map((u) => [u, 1])));
-			orderChanges.set(0, new ZSet([]));
-
-			// Many small updates
-			for (let i = 1; i <= UPDATE_COUNT; i++) {
-				const newOrders = generateOrders(ORDERS_PER_UPDATE, USER_IDS);
-				orderChanges.set(i, new ZSet(newOrders.map((o) => [o, 1])));
-				userChanges.set(i, new ZSet([]));
-			}
-
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
-
-			const results = incrementalJoin.execute(inputStream);
-
-			// Process all updates
-			for (let i = 0; i <= UPDATE_COUNT; i++) {
-				results.at(i);
-			}
-		});
-
-		bench('Non-Incremental Join - Recompute after each update', () => {
-			const group = new ZSetGroup<Order>();
-			let cumulativeOrders = new ZSet<Order>([]);
-			const allUsers = new ZSet(USERS.map((u) => [u, 1] as [User, number]));
-
-			// Simulate recomputing everything after each update
-			for (let i = 1; i <= UPDATE_COUNT; i++) {
-				const newOrders = generateOrders(ORDERS_PER_UPDATE, USER_IDS);
-				const newOrdersZSet = new ZSet(newOrders.map((o) => [o, 1] as [Order, number]));
-
-				// Add to cumulative (simulating database state)
-				cumulativeOrders = group.add(cumulativeOrders, newOrdersZSet);
-
-				// Recompute entire join
-				const result = ZSetOperators.equiJoin(
-					cumulativeOrders,
-					allUsers,
-					(order) => order.userId,
-					(user) => user.id
-				);
-
-				// Force evaluation
-				result.data.length;
-			}
-		});
-	});
-
-	// ========== SCENARIO 3: Scaling Test ==========
-	describe('Scaling behavior', () => {
-		const DATA_SIZES = [100, 500, 1000, 5000];
-
-		DATA_SIZES.forEach((size) => {
-			const users = generateUsers(size);
-			const userIds = users.map((u) => u.id);
-			const orders = generateOrders(size * 10, userIds);
-			const newOrders = generateOrders(size / 10, userIds); // 10% new data
-
-			bench(`Incremental Join - ${size} users, ${size * 10} orders`, () => {
-				const incrementalJoin = Circuit.equiJoin<Order, User, string>(
-					(order) => order.userId,
-					(user) => user.id
-				);
-
-				const orderChanges = new Stream<ZSet<Order>>(new ZSet([]));
-				orderChanges.set(0, new ZSet(orders.map((o) => [o, 1])));
-				orderChanges.set(1, new ZSet(newOrders.map((o) => [o, 1])));
-
-				const userChanges = new Stream<ZSet<User>>(new ZSet([]));
-				userChanges.set(0, new ZSet(users.map((u) => [u, 1])));
-				userChanges.set(1, new ZSet([]));
-
-				const inputStream = createTupleStream(
-					orderChanges,
-					userChanges,
-					new ZSet([]),
-					new ZSet([])
-				);
-
-				const results = incrementalJoin.execute(inputStream);
-				results.at(0);
-				results.at(1);
-			});
-
-			bench(`Non-Incremental Join - ${size} users, ${size * 10} orders`, () => {
-				const allOrders = new ZSet([
-					...orders.map((o) => [o, 1] as [Order, number]),
-					...newOrders.map((o) => [o, 1] as [Order, number])
-				]);
-				const allUsers = new ZSet(users.map((u) => [u, 1] as [User, number]));
-
-				const result = ZSetOperators.equiJoin(
-					allOrders,
-					allUsers,
-					(order) => order.userId,
-					(user) => user.id
-				);
-
-				result.data.length;
-			});
-		});
-	});
-
-	// ========== SCENARIO 4: Memory Usage Test ==========
-	describe('Memory efficiency', () => {
-		bench('Incremental Join - Memory usage over time', () => {
-			const incrementalJoin = Circuit.equiJoin<Order, User, string>(
-				(order) => order.userId,
-				(user) => user.id
-			);
-
-			const users = generateUsers(1000);
-			const userIds = users.map((u) => u.id);
-
-			const orderChanges = new Stream<ZSet<Order>>(new ZSet([]));
-			const userChanges = new Stream<ZSet<User>>(new ZSet([]));
-
-			userChanges.set(0, new ZSet(users.map((u) => [u, 1])));
-
-			// Simulate long-running process with many updates
-			for (let i = 0; i < 1000; i++) {
-				const orders = generateOrders(10, userIds);
-				orderChanges.set(i, new ZSet(orders.map((o) => [o, 1])));
-				if (i > 0) userChanges.set(i, new ZSet([]));
-			}
-
-			const inputStream = createTupleStream(orderChanges, userChanges, new ZSet([]), new ZSet([]));
-
-			const results = incrementalJoin.execute(inputStream);
-
-			// Process all updates
-			for (let i = 0; i < 1000; i++) {
-				results.at(i);
-			}
-		});
 	});
 });
