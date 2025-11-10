@@ -44,7 +44,7 @@
 		.reactive();
 
 	// Reactive state that automatically updates with any changes
-	let sortedRows = $state([]);
+	let sortedRows = $state<JoinedRow[]>([]);
 
 	const unsub = sortedRowsQuery.subscribe((x) => {
 		sortedRows = x;
