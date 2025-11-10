@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { createReactiveTable, ZSet, type BatchOperation } from '../../lib/index.js';
+	import { onDestroy } from 'svelte';
+	import { createQuery, createReactiveTable, ZSet, type BatchOperation } from '../../lib/index.js';
 
 	interface User {
 		id: string;
@@ -27,8 +27,9 @@
 		message: string;
 	}
 
-	let users: User[] = [];
-	let logs: LogEntry[] = [];
+	let users: User[] = $state([]);
+	let top10users: User[] = $state([]);
+	let logs: LogEntry[] = $state([]);
 
 	function log(message: string) {
 		const logEntry: LogEntry = {
@@ -39,17 +40,29 @@
 		logs = [logEntry, ...logs];
 	}
 
+	const top10Query = createQuery(userTable).sortBy('id').limit(10).reactive();
+	top10Query.subscribe((x) => {
+		top10users = x;
+	});
+
 	// Subscribe to table changes to update UI
-	onMount(() => {
-		const unsubscribe = userTable.subscribe((delta: ZSet<User>) => {
-			users = userTable.toArray();
-			log(`Delta received: ${delta.data.length} changes`);
-		});
-
-		// Initial load
+	const unsubscribe = userTable.subscribe((delta: ZSet<User>) => {
 		users = userTable.toArray();
+		log(`Delta received: ${delta.data.length} changes`);
+	});
+	users = userTable.toArray();
 
-		return unsubscribe;
+	const userCountQuery = createQuery(userTable).count();
+	// Reactive state that automatically updates with any changes
+	let userCount = $state(0);
+
+	const unsub = userCountQuery.subscribe((x) => {
+		userCount = x;
+	});
+
+	onDestroy(() => {
+		unsubscribe();
+		unsub();
 	});
 
 	// Simulate the optimistic update pattern for SQLite persistence
@@ -84,11 +97,11 @@
 			userTable.upsert(user);
 			log(`🔄 SQLite worker confirmed (${id.slice(-8)})`);
 			delete pendingOperations[operationId];
-		}, 1000);
+		}, 8000);
 	}
 
 	function simulateOptimisticDelete() {
-		if (users.length === 0) return;
+		if (userCount === 0) return;
 
 		const userId = users[0].id;
 		log('🗑️ Optimistic delete started');
@@ -102,11 +115,11 @@
 			// 3. Worker confirms deletion - idempotent!
 			const confirmed = userTable.safeRemove(userId);
 			log(`🔄 SQLite worker confirmed: ${confirmed ? 'deleted' : 'already removed'}`);
-		}, 1000);
+		}, 8000);
 	}
 
 	function simulateConflictResolution() {
-		if (users.length === 0) return;
+		if (userCount === 0) return;
 
 		const originalUser = users[0];
 		log('⚠️ Simulating conflict resolution');
@@ -126,28 +139,26 @@
 
 			userTable.applyDelta(correctionDelta);
 			log('✅ Conflict resolved with applyDelta');
-		}, 1500);
+		}, 8000);
 	}
 
 	function simulateBatchOperations() {
 		log('📦 Simulating batch operations from SQLite worker');
 
-		const operations: BatchOperation<User>[] = [
-			{
+		const batch = Array.from({ length: 1000 }).map((x, i) => {
+			const num = i + 1000 + userCount;
+			return {
 				type: 'upsert',
-				item: { id: '100', name: 'Batch User 1', email: 'batch1@example.com', status: 'active' }
-			},
-			{
-				type: 'upsert',
-				item: { id: '101', name: 'Batch User 2', email: 'batch2@example.com', status: 'inactive' }
-			},
-			{
-				type: 'remove',
-				id: users.length > 0 ? users[users.length - 1].id : 'nonexistent'
-			}
-		];
+				item: {
+					id: `${num}`,
+					name: `Batch User ${num}`,
+					email: `batch${num}@example.com`,
+					status: 'active'
+				}
+			};
+		});
 
-		userTable.batch(operations);
+		userTable.batch(batch);
 		log('✅ Batch operations completed - single notification sent');
 	}
 
@@ -168,15 +179,7 @@
 
 	function clearAll() {
 		// Create new table (simulates fresh start)
-		userTable = createReactiveTable<User>([], 'id');
-
-		// Re-subscribe
-		userTable.subscribe((delta: ZSet<User>) => {
-			users = userTable.toArray();
-			log(`Delta received: ${delta.data.length} changes`);
-		});
-
-		users = [];
+		userTable.clear();
 		logs = [];
 		pendingOperations = {};
 		log('🧹 Cleared all data');
@@ -191,19 +194,19 @@
 </p>
 
 <div class="controls">
-	<button on:click={simulateOptimisticUpsert}>🚀 Optimistic Upsert</button>
-	<button on:click={simulateOptimisticDelete}>🗑️ Optimistic Delete</button>
-	<button on:click={simulateConflictResolution}>⚠️ Conflict Resolution</button>
-	<button on:click={simulateBatchOperations}>📦 Batch Operations</button>
-	<button on:click={simulateInitialDataLoad}>📥 Initial Data Load</button>
-	<button on:click={clearAll}>🧹 Clear All</button>
+	<button onclick={simulateOptimisticUpsert}>🚀 Optimistic Upsert</button>
+	<button onclick={simulateOptimisticDelete}>🗑️ Optimistic Delete</button>
+	<button onclick={simulateConflictResolution}>⚠️ Conflict Resolution</button>
+	<button onclick={simulateBatchOperations}>📦 Batch Operations</button>
+	<button onclick={simulateInitialDataLoad}>📥 Initial Data Load</button>
+	<button onclick={clearAll}>🧹 Clear All</button>
 </div>
 
 <div class="layout">
 	<div class="users">
-		<h2>Users ({users.length})</h2>
+		<h2>Users ({users.length})({userCount}) limited to 10 in this table</h2>
 		<div class="user-grid">
-			{#each users as user (user.id)}
+			{#each top10users as user (user.id)}
 				<div class="user-card" class:inactive={user.status === 'inactive'}>
 					<div><strong>#{user.id}</strong></div>
 					<div>{user.name}</div>
@@ -213,6 +216,7 @@
 			{:else}
 				<div class="empty">No users yet...</div>
 			{/each}
+			<h3>TODO implement paging</h3>
 		</div>
 	</div>
 

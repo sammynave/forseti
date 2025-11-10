@@ -270,6 +270,16 @@ export class ReactiveTable<T extends Record<string, any>> {
 		this.notifySubscribers(delta);
 	}
 
+	clear(): void {
+		const allItems = Array.from(this.data.values());
+		this.data.clear();
+
+		if (allItems.length > 0) {
+			const clearDelta = new ZSet(allItems.map((item) => [item, -1]));
+			this.notifySubscribers(clearDelta);
+		}
+	}
+
 	/**
 	 * Apply multiple operations atomically with a single subscriber notification.
 	 *
