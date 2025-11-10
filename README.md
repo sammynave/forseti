@@ -1,3 +1,5 @@
+[Usage]('./USAGE.md')
+
 # TODO
 
 - [ ] think more about how the view will be materialized. that should maybe be an external construct that can date a `delta` from `.processIncrement` and apply
