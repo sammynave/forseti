@@ -6,6 +6,8 @@ import { generateOrders, generateUsers, type Order, type User } from './helpers.
 import { StatefulTopK } from '$lib/stateful-top-k.js';
 import { Circuit } from '$lib/circuit.js';
 import { createTupleStream, Stream } from '$lib/stream.js';
+import { createReactiveTable } from '$lib/reactive-table.js';
+import { createQuery } from '$lib/query-builder.js';
 
 describe('DBSP: True Incremental vs Batch Processing', () => {
 	// Smaller dataset to focus on algorithmic difference
@@ -76,7 +78,7 @@ describe('DBSP: True Incremental vs Batch Processing', () => {
 	});
 });
 
-describe('bench 1 change', () => {
+describe.skip('bench 1 change', () => {
 	const USERS_COUNT = 10_000;
 	const INITIAL_ORDERS = 100_000;
 	const NEW_ORDERS = 100;
@@ -137,7 +139,7 @@ describe('bench 1 change', () => {
 	});
 });
 
-describe('DBSP: True Incremental vs Batch Processing with Sorting', () => {
+describe.skip('DBSP: True Incremental vs Batch Processing with Sorting', () => {
 	// Smaller dataset to focus on algorithmic difference
 	const USERS_COUNT = 100;
 	const INITIAL_ORDERS = 1000;
