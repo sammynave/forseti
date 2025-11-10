@@ -1,4 +1,5 @@
 import { ZSet, ZSetGroup } from './z-set.js';
+import { ZSetOperators } from './z-set-operators.js';
 import { StatefulJoinCircuit, createStatefulJoinCircuit } from './stateful-circuit.js';
 import { StatefulTopK } from './stateful-top-k.js';
 import type { ReactiveTable } from './reactive-table.js';
@@ -10,11 +11,131 @@ interface QueryNode<T> {
 	subscribe(callback: (delta: ZSet<T>) => void): () => void;
 }
 
+// Internal aggregate query node
+class AggregateNode<T, R> implements QueryNode<R> {
+	private subscribers = new Set<(delta: ZSet<R>) => void>();
+	private lastResult: R | undefined;
+
+	constructor(
+		private sourceNode: QueryNode<T>,
+		private aggregateFunc: (zset: ZSet<T>) => R
+	) {
+		sourceNode.subscribe((delta) => {
+			// Recompute aggregate on any change (optimized version would be incremental)
+			const newResult = this.aggregateFunc(this.sourceNode.execute());
+
+			if (newResult !== this.lastResult) {
+				// Create delta for aggregate change
+				const deltaZSet = new ZSet<R>([]);
+
+				if (this.lastResult !== undefined) {
+					deltaZSet.append([this.lastResult, -1]); // Remove old
+				}
+				deltaZSet.append([newResult, 1]); // Add new
+
+				this.lastResult = newResult;
+				this.notifySubscribers(deltaZSet);
+			}
+		});
+	}
+
+	execute(): ZSet<R> {
+		const sourceZSet = this.sourceNode.execute();
+		const result = this.aggregateFunc(sourceZSet);
+		this.lastResult = result;
+		return ZSetOperators.makeset(result);
+	}
+
+	processIncrement(delta: ZSet<T>): ZSet<R> {
+		// For now, recompute (could be optimized for linear aggregates)
+		return this.execute();
+	}
+
+	subscribe(callback: (delta: ZSet<R>) => void): () => void {
+		this.subscribers.add(callback);
+		return () => this.subscribers.delete(callback);
+	}
+
+	private notifySubscribers(delta: ZSet<R>): void {
+		for (const callback of this.subscribers) {
+			callback(delta);
+		}
+	}
+}
+
+/**
+ * AggregateBuilder provides fluent API for aggregation operations
+ */
+export class AggregateBuilder<T> {
+	constructor(private zset: ZSet<T>) {}
+
+	count(): number {
+		return ZSetOperators.count(this.zset);
+	}
+
+	sum(extractor: (item: T) => number): number {
+		return ZSetOperators.sum(this.zset, extractor);
+	}
+
+	average(extractor: (item: T) => number): number | null {
+		return ZSetOperators.average(this.zset, extractor);
+	}
+}
+
+/**
+ * GroupedQueryBuilder handles queries after groupBy operation
+ */
+export class GroupedQueryBuilder<T, K> {
+	constructor(
+		private node: QueryNode<T>,
+		private keyExtractor: (item: T) => K
+	) {}
+
+	/**
+	 * Apply aggregation to each group
+	 */
+	aggregate<R>(aggregator: (group: AggregateBuilder<T>) => R): ReactiveQueryResult<[K, R]> {
+		const groupByNode = new GroupByNode(this.node, this.keyExtractor, aggregator);
+		return new ReactiveQueryResult(groupByNode);
+	}
+}
+
 /**
  * Main QueryBuilder class for fluent API
  */
 export class QueryBuilder<T> {
 	constructor(private node: QueryNode<T>) {}
+
+	/**
+	 * Group records by key for aggregation
+	 */
+	groupBy<K>(keyExtractor: (item: T) => K): GroupedQueryBuilder<T, K> {
+		return new GroupedQueryBuilder(this.node, keyExtractor);
+	}
+
+	/**
+	 * Get count of records
+	 */
+	count(): ReactiveQueryResult<number> {
+		const countNode = new AggregateNode(this.node, ZSetOperators.count);
+		return new ReactiveQueryResult(countNode);
+	}
+
+	/**
+	 * Sum a numeric field
+	 */
+	sum(extractor: (item: T) => number): ReactiveQueryResult<number> {
+		const sumNode = new AggregateNode(this.node, (zset) => ZSetOperators.sum(zset, extractor));
+		return new ReactiveQueryResult(sumNode);
+	}
+
+	/**
+	 * Average of a numeric field
+	 */
+	average(extractor: (item: T) => number): ReactiveQueryResult<number | null> {
+		const avgNode = new AggregateNode(this.node, (zset) => ZSetOperators.average(zset, extractor));
+		return new ReactiveQueryResult(avgNode);
+	}
 
 	/**
 	 * Join with another table
@@ -174,6 +295,102 @@ export class ReactiveQueryResult<T> {
 }
 
 // Internal query execution nodes
+
+class GroupByNode<T, K, R> implements QueryNode<[K, R]> {
+	private subscribers = new Set<(delta: ZSet<[K, R]>) => void>();
+	private lastResultMap = new Map<string, [K, R]>();
+
+	constructor(
+		private sourceNode: QueryNode<T>,
+		private keyExtractor: (item: T) => K,
+		private aggregator: (group: AggregateBuilder<T>) => R
+	) {
+		sourceNode.subscribe((delta) => {
+			// Recompute all groups on any change
+			const newGroups = this.computeGroupedAggregates();
+			const deltaZSet = this.computeGroupDelta(newGroups);
+
+			// Update last result
+			this.lastResultMap.clear();
+			for (const group of newGroups) {
+				const keyStr = JSON.stringify(group[0]);
+				this.lastResultMap.set(keyStr, group);
+			}
+
+			if (!deltaZSet.isEmpty()) {
+				this.notifySubscribers(deltaZSet);
+			}
+		});
+	}
+
+	execute(): ZSet<[K, R]> {
+		const groups = this.computeGroupedAggregates();
+		// Update last result
+		this.lastResultMap.clear();
+		for (const group of groups) {
+			const keyStr = JSON.stringify(group[0]);
+			this.lastResultMap.set(keyStr, group);
+		}
+		// Return ZSet where each group is a separate record
+		return new ZSet(groups.map((group) => [group, 1]));
+	}
+
+	processIncrement(delta: ZSet<T>): ZSet<[K, R]> {
+		// For now, recompute (could be optimized to be truly incremental)
+		return this.execute();
+	}
+
+	subscribe(callback: (delta: ZSet<[K, R]>) => void): () => void {
+		this.subscribers.add(callback);
+		return () => this.subscribers.delete(callback);
+	}
+
+	private computeGroupedAggregates(): Array<[K, R]> {
+		const sourceZSet = this.sourceNode.execute();
+		const groups = ZSetOperators.groupBy(sourceZSet, this.keyExtractor);
+
+		const result: Array<[K, R]> = [];
+		for (const [key, groupZSet] of groups.entries()) {
+			const aggregateBuilder = new AggregateBuilder(groupZSet);
+			const aggregateResult = this.aggregator(aggregateBuilder);
+			result.push([key, aggregateResult]);
+		}
+
+		return result;
+	}
+
+	private computeGroupDelta(newGroups: Array<[K, R]>): ZSet<[K, R]> {
+		const deltaZSet = new ZSet<[K, R]>([]);
+
+		// Remove old groups that no longer exist or have changed
+		for (const [keyStr, oldGroup] of this.lastResultMap.entries()) {
+			const key = JSON.parse(keyStr);
+			const newGroup = newGroups.find(([k]) => JSON.stringify(k) === keyStr);
+
+			if (!newGroup || JSON.stringify(newGroup[1]) !== JSON.stringify(oldGroup[1])) {
+				deltaZSet.append([oldGroup, -1]); // Remove old
+			}
+		}
+
+		// Add new groups or changed groups
+		for (const newGroup of newGroups) {
+			const keyStr = JSON.stringify(newGroup[0]);
+			const oldGroup = this.lastResultMap.get(keyStr);
+
+			if (!oldGroup || JSON.stringify(newGroup[1]) !== JSON.stringify(oldGroup[1])) {
+				deltaZSet.append([newGroup, 1]); // Add new
+			}
+		}
+
+		return deltaZSet.mergeRecords();
+	}
+
+	private notifySubscribers(delta: ZSet<[K, R]>): void {
+		for (const callback of this.subscribers) {
+			callback(delta);
+		}
+	}
+}
 
 class TableNode<T extends Record<string, any>> implements QueryNode<T> {
 	private unsubscribe?: () => void;

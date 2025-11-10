@@ -78,7 +78,7 @@ describe('DBSP: True Incremental vs Batch Processing', () => {
 	});
 });
 
-describe.skip('bench 1 change', () => {
+describe('bench 1 change', () => {
 	const USERS_COUNT = 10_000;
 	const INITIAL_ORDERS = 100_000;
 	const NEW_ORDERS = 100;
@@ -139,7 +139,7 @@ describe.skip('bench 1 change', () => {
 	});
 });
 
-describe.skip('DBSP: True Incremental vs Batch Processing with Sorting', () => {
+describe('DBSP: True Incremental vs Batch Processing with Sorting', () => {
 	// Smaller dataset to focus on algorithmic difference
 	const USERS_COUNT = 100;
 	const INITIAL_ORDERS = 1000;

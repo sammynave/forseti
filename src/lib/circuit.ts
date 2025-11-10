@@ -195,7 +195,37 @@ export class Circuit<A, B> {
 	// ========== AGGREGATION OPERATIONS (when implemented) ==========
 
 	// Note: These would need to be implemented once the ZSetOperators stubs are filled
-	// static count<T>(): Circuit<ZSet<T>, number> { ... }
-	// static sum<T>(): Circuit<ZSet<T>, number> { ... }
-	// etc.
+
+	/**
+	 * COUNT circuit - automatically incremental (linear operator)
+	 */
+	static count<T>(): Circuit<ZSet<T>, ZSet<number>> {
+		const op = lift((zset: ZSet<T>) => {
+			const count = ZSetOperators.count(zset);
+			return ZSetOperators.makeset(count);
+		});
+		return new Circuit(op);
+	}
+
+	/**
+	 * SUM circuit - automatically incremental (linear operator)
+	 */
+	static sum<T>(extractor: (record: T) => number): Circuit<ZSet<T>, ZSet<number>> {
+		const op = lift((zset: ZSet<T>) => {
+			const sum = ZSetOperators.sum(zset, extractor);
+			return ZSetOperators.makeset(sum);
+		});
+		return new Circuit(op);
+	}
+
+	/**
+	 * AVERAGE circuit - composite operation
+	 */
+	static average<T>(extractor: (record: T) => number): Circuit<ZSet<T>, ZSet<number | null>> {
+		const op = lift((zset: ZSet<T>) => {
+			const avg = ZSetOperators.average(zset, extractor);
+			return ZSetOperators.makeset(avg);
+		});
+		return new Circuit(op);
+	}
 }

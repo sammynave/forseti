@@ -19,11 +19,78 @@ const joined = ZSetOperators.equiJoin(
 */
 
 export class ZSetOperators {
-	// Aggregates
-	count() {}
-	sum() {}
-	min() {}
-	max() {}
+	// ========== LINEAR AGGREGATION (Automatically Incremental) ==========
+	// Paper Section 7.2: "The aggregation functions a_COUNT and a_SUM are in fact
+	// linear transformations between the group Z[A] and the result group"
+
+	/**
+	 * COUNT: a_COUNT(s) = Σ_{x∈s} s[x] (sum of all weights)
+	 * Linear operator - automatically incremental per Theorem 3.3
+	 */
+	static count<T>(zset: ZSet<T>): number {
+		return zset.data.reduce((sum, [_, weight]) => sum + weight, 0);
+	}
+
+	/**
+	 * SUM: a_SUM(s) = Σ_{x∈s} x × s[x] (weighted sum of values)
+	 * Linear operator - automatically incremental per Theorem 3.3
+	 */
+	static sum<T>(zset: ZSet<T>, extractor: (record: T) => number): number {
+		return zset.data.reduce((sum, [record, weight]) => {
+			const value = extractor(record);
+			return sum + value * weight;
+		}, 0);
+	}
+
+	/**
+	 * AVERAGE: Composite of SUM and COUNT
+	 * Paper approach: Use makeset to convert back to Z-set for composition
+	 */
+	static average<T>(zset: ZSet<T>, extractor: (record: T) => number): number | null {
+		const totalSum = this.sum(zset, extractor);
+		const totalCount = this.count(zset);
+
+		return totalCount === 0 ? null : totalSum / totalCount;
+	}
+
+	/**
+	 * makeset: Convert scalar to singleton Z-set (from paper Section 7.2)
+	 * makeset(x) = {x ↦ 1}
+	 */
+	static makeset<T>(value: T): ZSet<T> {
+		return new ZSet([[value, 1]]);
+	}
+
+	// ========== GROUP-BY OPERATIONS ==========
+	// Paper Section 7.3: "indexed Z-sets" - K → Z[A] = Z[A][K]
+
+	/**
+	 * GroupBy: G_p(a)[k] = Σ_{x∈a, p(x)=k} a[x] · x
+	 *
+	 * Paper Citation: Section 7.3 - "We define the grouping function G_p : Z[A] → Z[A][K]"
+	 * Properties: "The grouping function G_p is linear for any key function p!"
+	 * This means groupBy is automatically incremental.
+	 */
+	static groupBy<T, K>(zset: ZSet<T>, keyExtractor: (record: T) => K): Map<K, ZSet<T>> {
+		const groups = new Map<K, ZSet<T>>();
+
+		for (const [record, weight] of zset.data) {
+			const key = keyExtractor(record);
+
+			if (!groups.has(key)) {
+				groups.set(key, new ZSet<T>([]));
+			}
+
+			groups.get(key)!.append([record, weight]);
+		}
+
+		// Merge records in each group
+		for (const [key, group] of groups.entries()) {
+			groups.set(key, group.mergeRecords());
+		}
+
+		return groups;
+	}
 
 	// ========== LINEAR OPERATIONS ==========
 	// Paper Section 4.2, Table 1
@@ -262,4 +329,11 @@ export class ZSetOperators {
 
 		return new ZSet(topK);
 	}
+
+	// ============ window functions ==============
+	/*
+		ROW_NUMBER()
+		RANK()
+		LAG()/LEAD()
+	*/
 }

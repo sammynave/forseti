@@ -4,6 +4,8 @@ export {
 	createQuery,
 	QueryBuilder,
 	JoinedQueryBuilder,
+	GroupedQueryBuilder,
+	AggregateBuilder,
 	ReactiveQueryResult
 } from './query-builder.js';
 

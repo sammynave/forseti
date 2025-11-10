@@ -81,6 +81,7 @@
 	click on console header
 </h2>
 <div>
+	<p>Total rows: {sortedRows.length}</p>
 	<button onclick={handleAddOrder}>Add New Order</button>
 	<button onclick={editBob}> edit Bob amount via lib</button>
 
@@ -106,8 +107,6 @@
 			{/each}
 		</tbody>
 	</table>
-
-	<p>Total rows: {sortedRows.length}</p>
 </div>
 
 <style>
