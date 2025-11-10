@@ -32,6 +32,9 @@ importers:
       '@vitest/browser':
         specifier: ^3.2.3
         version: 3.2.4(playwright@1.55.0)(vite@7.1.6(@types/node@22.18.6))(vitest@3.2.4)
+      agadoo:
+        specifier: github:KonnorRogers/agadoo#patch-1
+        version: https://codeload.github.com/KonnorRogers/agadoo/tar.gz/04cfd508c2c9d60462d624c20c9e34d143ee476d
       eslint:
         specifier: ^9.22.0
         version: 9.35.0
@@ -352,6 +355,15 @@ packages:
     resolution: {integrity: sha512-S+9ANAvUmjutrshV4jZjaiG8XQyuJIZ8a4utWmN/vW1sgQ9IfBnPndwkmQYw53QmouOIytT874u65HEmu6H5jw==}
     engines: {node: '>=18'}
 
+  '@rollup/plugin-virtual@3.0.2':
+    resolution: {integrity: sha512-10monEYsBp3scM4/ND4LNH5Rxvh3e/cVeL3jWTgZ2SrQ+BmUoQcopVQvnaMcOnykb1VkxUFuDAN+0FnpTFRy2A==}
+    engines: {node: '>=14.0.0'}
+    peerDependencies:
+      rollup: ^1.20.0||^2.0.0||^3.0.0||^4.0.0
+    peerDependenciesMeta:
+      rollup:
+        optional: true
+
   '@rollup/rollup-android-arm-eabi@4.50.2':
     resolution: {integrity: sha512-uLN8NAiFVIRKX9ZQha8wy6UUs06UNSZ32xj6giK/rmMXAgKahwExvK6SsmgU5/brh4w/nSgj8e0k3c1HBQpa0A==}
     cpu: [arm]
@@ -647,6 +659,11 @@ packages:
   acorn@8.15.0:
     resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
     engines: {node: '>=0.4.0'}
+    hasBin: true
+
+  agadoo@https://codeload.github.com/KonnorRogers/agadoo/tar.gz/04cfd508c2c9d60462d624c20c9e34d143ee476d:
+    resolution: {tarball: https://codeload.github.com/KonnorRogers/agadoo/tar.gz/04cfd508c2c9d60462d624c20c9e34d143ee476d}
+    version: 3.0.0
     hasBin: true
 
   ajv@6.12.6:
@@ -1206,6 +1223,11 @@ packages:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
     engines: {iojs: '>=1.0.0', node: '>=0.10.0'}
 
+  rollup@3.29.5:
+    resolution: {integrity: sha512-GVsDdsbJzzy4S/v3dqWPJ7EfvZJfCHiDqe80IyrF59LYuP+e6U1LJoUqeuqRbwAWoMNoXivMNeNAOf5E22VA1w==}
+    engines: {node: '>=14.18.0', npm: '>=8.0.0'}
+    hasBin: true
+
   rollup@4.50.2:
     resolution: {integrity: sha512-BgLRGy7tNS9H66aIMASq1qSYbAAJV6Z6WR4QYTvj5FgF15rZ/ympT1uixHXwzbZUBDbkvqUI1KR0fH1FhMaQ9w==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
@@ -1677,6 +1699,10 @@ snapshots:
 
   '@publint/pack@0.1.2': {}
 
+  '@rollup/plugin-virtual@3.0.2(rollup@3.29.5)':
+    optionalDependencies:
+      rollup: 3.29.5
+
   '@rollup/rollup-android-arm-eabi@4.50.2':
     optional: true
 
@@ -1993,6 +2019,12 @@ snapshots:
       acorn: 8.15.0
 
   acorn@8.15.0: {}
+
+  agadoo@https://codeload.github.com/KonnorRogers/agadoo/tar.gz/04cfd508c2c9d60462d624c20c9e34d143ee476d:
+    dependencies:
+      '@rollup/plugin-virtual': 3.0.2(rollup@3.29.5)
+      acorn: 8.15.0
+      rollup: 3.29.5
 
   ajv@6.12.6:
     dependencies:
@@ -2508,6 +2540,10 @@ snapshots:
   resolve-from@4.0.0: {}
 
   reusify@1.1.0: {}
+
+  rollup@3.29.5:
+    optionalDependencies:
+      fsevents: 2.3.3
 
   rollup@4.50.2:
     dependencies:
