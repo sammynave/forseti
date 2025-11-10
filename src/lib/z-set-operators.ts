@@ -238,4 +238,28 @@ export class ZSetOperators {
 		const diff = a.concat(negatedB).mergeRecords();
 		return this.distinct(diff);
 	}
+
+	// ========== ORDERING OPERATIONS ==========
+
+	/**
+	 * TopK: Select top K elements by comparator
+	 * Non-linear operator - needs custom incremental implementation
+	 */
+	static topK<T>(
+		zset: ZSet<T>,
+		comparator: (a: T, b: T) => number,
+		k: number = Infinity,
+		offset: number = 0
+	): ZSet<T> {
+		// Batch implementation for reference
+		const sorted = [...zset.data]
+			.filter(([_, weight]) => weight > 0)
+			.sort(([a], [b]) => comparator(a, b));
+
+		const topK = sorted
+			.slice(offset, offset + k)
+			.map(([record, weight]) => [record, Math.min(weight, 1)] as [T, number]);
+
+		return new ZSet(topK);
+	}
 }

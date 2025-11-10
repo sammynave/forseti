@@ -1,4 +1,4 @@
-import type { Stream, StreamOperator } from './stream.js';
+import { Stream, type StreamOperator } from './stream.js';
 import { ZSet, ZSetGroup, TupleGroup } from './z-set.js';
 import { ZSetOperators } from './z-set-operators.js';
 import { incrementalize as naiveIncrementalize } from './stream.js';
@@ -8,6 +8,7 @@ import {
 	optimizeBilinear,
 	optimizedDistinctIncremental
 } from './optimization.js';
+import { StatefulTopK } from './stateful-top-k.js';
 
 export class Circuit<A, B> {
 	constructor(private operator: StreamOperator<A, B>) {}
@@ -151,6 +152,44 @@ export class Circuit<A, B> {
 			new ZSetGroup<T>()
 		);
 		return new Circuit(op);
+	}
+
+	// ========== ORDERING OPERATIONS ==========
+
+	static topK<T>(
+		comparator: (a: T, b: T) => number,
+		options: { limit?: number; offset?: number } = {}
+	): Circuit<ZSet<T>, ZSet<T>> {
+		const { limit = Infinity, offset = 0 } = options;
+
+		// Use stateful operator for true incremental processing
+		let statefulTopK = new StatefulTopK(comparator, limit, offset, new ZSetGroup<T>());
+
+		const op = (input: Stream<ZSet<T>>) => {
+			const output = new Stream<ZSet<T>>(new ZSet([]));
+
+			for (const [time, delta] of input.entries()) {
+				const resultDelta = statefulTopK.processIncrement(delta);
+				output.set(time, resultDelta);
+			}
+
+			return output;
+		};
+
+		return new Circuit(op);
+	}
+
+	static orderBy<T, K>(
+		keyExtractor: (t: T) => K,
+		comparator: (a: K, b: K) => number,
+		options: { limit?: number; offset?: number } = {}
+	): Circuit<ZSet<T>, ZSet<T>> {
+		// Compose from existing operators following d2ts pattern
+		const extractKeys = Circuit.project<T, [T, K]>((t) => [t, keyExtractor(t)]);
+		const topKByKey = Circuit.topK<[T, K]>(([, a], [, b]) => comparator(a, b), options);
+		const originalRecords = Circuit.project<[T, K], T>(([t]) => t);
+
+		return extractKeys.compose(topKByKey).compose(originalRecords);
 	}
 
 	// ========== AGGREGATION OPERATIONS (when implemented) ==========
