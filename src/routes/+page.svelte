@@ -148,7 +148,7 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each sorted as row (`${row.orderId}${row.userId}${row.amount}`)}
+			{#each sorted as row (row.orderId)}
 				<tr>
 					<td id={row.orderId}>{row.orderId}</td>
 					<td>{row.userName} ({row.userId})</td>
