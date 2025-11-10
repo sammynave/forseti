@@ -12,6 +12,7 @@
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"test:unit": "vitest",
+		"test:watch": "vitest --watch",
 		"bench": "vitest bench",
 		"test": "npm run test:unit -- --run"
 	},
@@ -54,6 +55,7 @@
 		"publint": "^0.3.2",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
+		"svelte-render-scan": "^1.1.0",
 		"typescript": "^5.0.0",
 		"typescript-eslint": "^8.20.0",
 		"vite": "^7.0.4",
