@@ -1,5 +1,6 @@
 // High-level API - recommended for most users
 export { createReactiveTable, ReactiveTable } from './reactive-table.js';
+export type { BatchOperation } from './reactive-table.js';
 export {
 	createQuery,
 	QueryBuilder,
