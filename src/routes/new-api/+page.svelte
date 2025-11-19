@@ -42,12 +42,33 @@
 		)
 		.sortBy('orderId')
 		.reactive();
+	const top = createQuery(orders)
+		.join(
+			users,
+			(order: Order) => order.userId,
+			(user: User) => user.id
+		)
+		.select(
+			(order: Order, user: User): JoinedRow => ({
+				orderId: order.id,
+				userId: user.id,
+				userName: user.name,
+				amount: order.amount
+			})
+		)
+		.sortBy('amount', 'desc')
+		.limit(1)
+		.reactive();
 
 	// Reactive state that automatically updates with any changes
 	let sortedRows = $state<JoinedRow[]>([]);
+	let topRow = $state<string>('');
 
 	const unsub = sortedRowsQuery.subscribe((x) => {
 		sortedRows = x;
+	});
+	const unsubTop = top.subscribe((x) => {
+		topRow = JSON.stringify(x[0].amount);
 	});
 
 	// Simple CRUD operations - no manual delta processing needed
@@ -72,6 +93,7 @@
 
 	onDestroy(() => {
 		unsub();
+		unsubTop();
 	});
 </script>
 
@@ -81,6 +103,7 @@
 	click on console header
 </h2>
 <div>
+	<p>most expensive order: {topRow}</p>
 	<p>Total rows: {sortedRows.length}</p>
 	<button onclick={handleAddOrder}>Add New Order</button>
 	<button onclick={editBob}> edit Bob amount via lib</button>

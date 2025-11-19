@@ -4,6 +4,13 @@ import { StatefulJoinCircuit, createStatefulJoinCircuit } from './stateful-circu
 import { StatefulTopK } from './stateful-top-k.js';
 import type { ReactiveTable } from './reactive-table.js';
 
+// TODO
+// TODO
+// TODO
+// TODO
+// Query builder should be lazy and it should arrange the nodes in order.
+//  We don't want to have to memorize that `limit` must come after `sortBy`
+
 // Internal interface for query execution nodes
 interface QueryNode<T> {
 	execute(): ZSet<T>;
@@ -13,6 +20,7 @@ interface QueryNode<T> {
 
 // Internal aggregate query node
 class AggregateNode<T, R> implements QueryNode<R> {
+	type = 'aggregate';
 	private subscribers = new Set<(delta: ZSet<R>) => void>();
 	private lastResult: R | undefined;
 
@@ -110,6 +118,8 @@ export class QueryBuilder<T> {
 	 * Group records by key for aggregation
 	 */
 	groupBy<K>(keyExtractor: (item: T) => K): GroupedQueryBuilder<T, K> {
+		// this isn't a node so we can't have it out of order yet
+		// aggeregates need to be last for now
 		return new GroupedQueryBuilder(this.node, keyExtractor);
 	}
 
@@ -297,6 +307,7 @@ export class ReactiveQueryResult<T> {
 // Internal query execution nodes
 
 class GroupByNode<T, K, R> implements QueryNode<[K, R]> {
+	type = 'group-by';
 	private subscribers = new Set<(delta: ZSet<[K, R]>) => void>();
 	private lastResultMap = new Map<string, [K, R]>();
 
@@ -393,6 +404,7 @@ class GroupByNode<T, K, R> implements QueryNode<[K, R]> {
 }
 
 class TableNode<T extends Record<string, any>> implements QueryNode<T> {
+	type = 'table';
 	private unsubscribe?: () => void;
 	private subscribers = new Set<(delta: ZSet<T>) => void>();
 
@@ -419,6 +431,7 @@ class TableNode<T extends Record<string, any>> implements QueryNode<T> {
 }
 
 class JoinNode<T, U extends Record<string, any>, K> implements QueryNode<[T, U]> {
+	type = 'join';
 	private circuit: StatefulJoinCircuit<T, U, K>;
 	private subscribers = new Set<(delta: ZSet<[T, U]>) => void>();
 
@@ -470,6 +483,7 @@ class JoinNode<T, U extends Record<string, any>, K> implements QueryNode<[T, U]>
 }
 
 class SelectNode<T, R> implements QueryNode<R> {
+	type = 'select';
 	private subscribers = new Set<(delta: ZSet<R>) => void>();
 
 	constructor(
@@ -515,6 +529,7 @@ class SelectNode<T, R> implements QueryNode<R> {
 }
 
 class TupleSelectNode<T, U, R> implements QueryNode<R> {
+	type = 'tuple-select';
 	private subscribers = new Set<(delta: ZSet<R>) => void>();
 
 	constructor(
@@ -560,6 +575,7 @@ class TupleSelectNode<T, U, R> implements QueryNode<R> {
 }
 
 class FilterNode<T> implements QueryNode<T> {
+	type = 'filter';
 	private subscribers = new Set<(delta: ZSet<T>) => void>();
 
 	constructor(
@@ -603,6 +619,7 @@ class FilterNode<T> implements QueryNode<T> {
 }
 
 class SortNode<T> implements QueryNode<T> {
+	type = 'sort';
 	private sortCircuit: StatefulTopK<T>;
 	private subscribers = new Set<(delta: ZSet<T>) => void>();
 
@@ -622,7 +639,9 @@ class SortNode<T> implements QueryNode<T> {
 			this.notifySubscribers(sortedDelta);
 		});
 	}
-
+	getSortComparator(): ((a: T, b: T) => number) | null {
+		return this.comparator;
+	}
 	execute(): ZSet<T> {
 		return this.sortCircuit.getCurrentState().topK;
 	}
@@ -643,7 +662,21 @@ class SortNode<T> implements QueryNode<T> {
 	}
 }
 
+function getNodesFrom(node) {
+	const nodes = [node];
+	let currNode = node.sourceNode;
+	let hasPrevNode = currNode ?? false;
+
+	while (hasPrevNode) {
+		nodes.push(currNode);
+		currNode = currNode?.sourceNode ?? false;
+		hasPrevNode = currNode;
+	}
+	return nodes;
+}
+
 class LimitNode<T> implements QueryNode<T> {
+	type = 'limit';
 	private limitCircuit: StatefulTopK<T>;
 	private subscribers = new Set<(delta: ZSet<T>) => void>();
 
@@ -652,13 +685,13 @@ class LimitNode<T> implements QueryNode<T> {
 		private limit: number,
 		private offset: number
 	) {
-		// Use identity comparator to preserve original order
-		this.limitCircuit = new StatefulTopK(
-			() => 0, // No sorting, just limiting
-			limit,
-			offset,
-			new ZSetGroup<T>()
-		);
+		const nodes = getNodesFrom(sourceNode);
+		const identity = (a: T, b: T) => 0;
+		// TODO only supporting 1 sortBy currently
+		const sortOp = nodes.find((op) => op.type === 'sort');
+		const comparator = sortOp?.getSortComparator() ?? identity;
+
+		this.limitCircuit = new StatefulTopK(comparator, limit, offset, new ZSetGroup<T>());
 
 		// Initialize with current data
 		const initialData = sourceNode.execute();
