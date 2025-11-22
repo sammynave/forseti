@@ -443,10 +443,10 @@ class JoinNode<T, U extends Record<string, any>, K> implements QueryNode<[T, U]>
 	) {
 		this.circuit = createStatefulJoinCircuit(this.leftKey, this.rightKey);
 
-		// Initialize with current data
+		// Initialize with current data using optimized bulk loading
 		const initialLeft = leftNode.execute();
 		const initialRight = rightTable.toZSet();
-		this.circuit.initialize(initialLeft, initialRight);
+		this.circuit.processInitial(initialLeft, initialRight);
 
 		// Subscribe to left changes
 		leftNode.subscribe((leftDelta) => {
@@ -629,9 +629,16 @@ class SortNode<T> implements QueryNode<T> {
 	) {
 		this.sortCircuit = new StatefulTopK(comparator, Infinity, 0, new ZSetGroup<T>());
 
-		// Initialize with current data
+		// Initialize with current data using bulk loading if available
 		const initialData = sourceNode.execute();
-		this.sortCircuit.processIncrement(initialData);
+		if (
+			'processInitial' in this.sortCircuit &&
+			typeof this.sortCircuit.processInitial === 'function'
+		) {
+			this.sortCircuit.processInitial(initialData);
+		} else {
+			this.sortCircuit.processIncrement(initialData);
+		}
 
 		// Subscribe to changes
 		sourceNode.subscribe((delta) => {
@@ -662,7 +669,7 @@ class SortNode<T> implements QueryNode<T> {
 	}
 }
 
-function getNodesFrom(node) {
+function getNodesFrom(node: any): any[] {
 	const nodes = [node];
 	let currNode = node.sourceNode;
 	let hasPrevNode = currNode ?? false;
@@ -693,9 +700,16 @@ class LimitNode<T> implements QueryNode<T> {
 
 		this.limitCircuit = new StatefulTopK(comparator, limit, offset, new ZSetGroup<T>());
 
-		// Initialize with current data
+		// Initialize with current data using bulk loading if available
 		const initialData = sourceNode.execute();
-		this.limitCircuit.processIncrement(initialData);
+		if (
+			'processInitial' in this.limitCircuit &&
+			typeof this.limitCircuit.processInitial === 'function'
+		) {
+			this.limitCircuit.processInitial(initialData);
+		} else {
+			this.limitCircuit.processIncrement(initialData);
+		}
 
 		// Subscribe to changes
 		sourceNode.subscribe((delta) => {
