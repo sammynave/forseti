@@ -24,6 +24,18 @@ export class StatefulJoinCircuit<T, U, K> {
 	}
 
 	/**
+	 * Optimized bulk loading for initial large datasets
+	 * Delegates to StatefulEquiJoin's bulk loading optimization
+	 *
+	 * @param initialA - Initial dataset for stream A
+	 * @param initialB - Initial dataset for stream B
+	 * @returns Bulk join results
+	 */
+	processInitial(initialA: ZSet<T>, initialB: ZSet<U>): ZSet<[T, U]> {
+		return this.statefulJoin.processInitial(initialA, initialB);
+	}
+
+	/**
 	 * Process incremental updates using the bilinear formula with persistent indexes:
 	 * (a × b)^Δ = Δa × Δb + Δa × I(b) + I(a) × Δb
 	 *

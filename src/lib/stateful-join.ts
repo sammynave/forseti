@@ -27,6 +27,87 @@ export class StatefulEquiJoin<T, U, K> {
 	}
 
 	/**
+	 * Optimized bulk loading for initial large datasets
+	 * Avoids incremental index updates when loading initial data
+	 */
+	processInitial(initialA: ZSet<T>, initialB: ZSet<U>): ZSet<[T, U]> {
+		// Fast path: if indexes are empty, we can optimize heavily
+		if (this.indexA.size === 0 && this.indexB.size === 0 && this.materializedViewMap.size === 0) {
+			return this.bulkInitialize(initialA, initialB);
+		}
+
+		// Fallback to incremental for non-empty state
+		return this.processIncrement(initialA, initialB);
+	}
+
+	private bulkInitialize(initialA: ZSet<T>, initialB: ZSet<U>): ZSet<[T, U]> {
+		// 1. Build indexes in bulk (more efficient than incremental updates)
+		this.bulkBuildIndex(this.indexA, initialA, this.keyExtractorA);
+		this.bulkBuildIndex(this.indexB, initialB, this.keyExtractorB);
+
+		// 2. Perform join operation with pre-built indexes
+		const joinResult = this.bulkJoin(initialA, initialB);
+
+		// 3. Build materialized view directly from join result
+		this.buildMaterializedViewFromResult(joinResult);
+
+		return joinResult;
+	}
+
+	private bulkBuildIndex<V>(
+		index: Map<string, Array<[V, number]>>,
+		data: ZSet<V>,
+		keyExtractor: (record: V) => K
+	): void {
+		// Group records by key efficiently
+		const keyGroups = new Map<string, Array<[V, number]>>();
+
+		for (const [record, weight] of data.data) {
+			const key = keyExtractor(record);
+			const keyStr = JSON.stringify(key);
+
+			if (!keyGroups.has(keyStr)) {
+				keyGroups.set(keyStr, []);
+			}
+			keyGroups.get(keyStr)!.push([record, weight]);
+		}
+
+		// Set index entries in bulk
+		for (const [keyStr, records] of keyGroups.entries()) {
+			index.set(keyStr, records);
+		}
+	}
+
+	private bulkJoin(a: ZSet<T>, b: ZSet<U>): ZSet<[T, U]> {
+		const result = this.groupC.zero();
+
+		// Use the pre-built indexB for efficient joining
+		for (const [recordA, weightA] of a.data) {
+			const keyA = this.keyExtractorA(recordA);
+			const keyStr = JSON.stringify(keyA);
+			const matchingBRecords = this.indexB.get(keyStr) || [];
+
+			for (const [recordB, weightB] of matchingBRecords) {
+				const combinedWeight = weightA * weightB;
+				if (combinedWeight !== 0) {
+					result.append([[recordA, recordB], combinedWeight]);
+				}
+			}
+		}
+
+		return result.mergeRecords();
+	}
+
+	private buildMaterializedViewFromResult(joinResult: ZSet<[T, U]>): void {
+		for (const [record, weight] of joinResult.data) {
+			if (weight !== 0) {
+				const key = JSON.stringify(record);
+				this.materializedViewMap.set(key, [record, weight]);
+			}
+		}
+	}
+
+	/**
 	 * Process incremental join using persistent indexes.
 	 * Only processes the delta records, not the entire dataset.
 	 *
